@@ -1,0 +1,5 @@
+bin/
+obj/
+audio-data/
+.vs/
+*.user

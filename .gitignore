@@ -1,0 +1,12 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.vs/
+.vscode/
+.idea/
+*.user
+
+# Secrets (API keys live in dotnet user-secrets, outside the repo)
+.env
+.env.*
+!.env.example
