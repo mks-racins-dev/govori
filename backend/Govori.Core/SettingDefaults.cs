@@ -28,6 +28,7 @@ public static class SettingDefaults
         [SettingKeys.NoSpeech] = "Мы не услышали речь в этой записи. Проверьте микрофон и попробуйте ещё раз.",
         [PageDefaults.PrivacyKey] = PageDefaults.Privacy,
         [PageDefaults.SupportKey] = PageDefaults.Support,
+        [PageDefaults.HomeKey] = PageDefaults.Home,
     };
 
     public static string[] Lines(string value) =>

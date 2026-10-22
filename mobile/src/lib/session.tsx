@@ -26,6 +26,7 @@ type Session = {
   signedIn: boolean;
   signInWithApple: () => Promise<void>;
   signInDev: () => Promise<void>;
+  signInWithPassword: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -59,6 +60,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         await SecureStore.setItemAsync(DEVICE_KEY, deviceId);
       }
       const { token } = await api.devLogin(deviceId);
+      await saveToken(token);
+      setSignedIn(true);
+    },
+    async signInWithPassword(username: string, password: string) {
+      const { token } = await api.passwordLogin(username, password);
       await saveToken(token);
       setSignedIn(true);
     },

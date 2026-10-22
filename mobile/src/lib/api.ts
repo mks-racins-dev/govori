@@ -84,6 +84,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   devLogin: (deviceId: string) =>
     request<{ token: string }>('/auth/dev', { method: 'POST', body: JSON.stringify({ deviceId }) }),
+  passwordLogin: (username: string, password: string) =>
+    request<{ token: string }>('/auth/password', { method: 'POST', body: JSON.stringify({ username, password }) }),
   appleLogin: (identityToken: string) =>
     request<{ token: string }>('/auth/apple', { method: 'POST', body: JSON.stringify({ identityToken }) }),
 

@@ -51,6 +51,7 @@ public static class AuthEndpoints
 {
     public record AppleLogin(string IdentityToken);
     public record DevLogin(string DeviceId);
+    public record PasswordLogin(string Username, string Password);
     public record AuthResponse(string Token);
 
     public static void MapAuthEndpoints(this WebApplication app)
@@ -65,6 +66,20 @@ public static class AuthEndpoints
             return Results.Ok(new AuthResponse(tokens.Issue(user.Id)));
         });
 
+        // Username/password login for App Review only. Enabled when Review:Username and Review:Password are set.
+        var reviewUser = app.Configuration["Review:Username"];
+        var reviewPassword = app.Configuration["Review:Password"];
+        if (!string.IsNullOrWhiteSpace(reviewUser) && !string.IsNullOrWhiteSpace(reviewPassword))
+        {
+            app.MapPost("/auth/password", async (PasswordLogin body, GovoriDbContext db, TokenService tokens, CancellationToken ct) =>
+            {
+                var ok = FixedTimeEquals(body.Username, reviewUser) & FixedTimeEquals(body.Password, reviewPassword);
+                if (!ok) return Results.Unauthorized();
+                var user = await FindOrCreate(db, "review:" + reviewUser, ct);
+                return Results.Ok(new AuthResponse(tokens.Issue(user.Id)));
+            });
+        }
+
         // Device-based login for development, before an Apple Developer account is set up.
         if (app.Configuration.GetValue<bool>("Auth:AllowDevLogin"))
         {
@@ -76,6 +91,10 @@ public static class AuthEndpoints
             });
         }
     }
+
+    private static bool FixedTimeEquals(string? a, string b) =>
+        System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(a ?? ""), Encoding.UTF8.GetBytes(b));
 
     private static async Task<User> FindOrCreate(GovoriDbContext db, string subject, CancellationToken ct)
     {

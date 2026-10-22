@@ -3,11 +3,13 @@ using Govori.Core;
 
 namespace Govori.Api;
 
-/// <summary>Public HTML pages linked from App Store Connect: /privacy and /support.</summary>
+/// <summary>Public HTML pages linked from App Store Connect: / (marketing), /privacy and /support.</summary>
 public static class Pages
 {
     public static void MapPages(this WebApplication app)
     {
+        app.MapGet("/", (IContentProvider content, IConfiguration config, CancellationToken ct) =>
+            Render(content, config, PageDefaults.HomeKey, "Говори! — тренажёр импровизации", ct));
         app.MapGet("/privacy", (IContentProvider content, IConfiguration config, CancellationToken ct) =>
             Render(content, config, PageDefaults.PrivacyKey, "Политика конфиденциальности — Говори!", ct));
         app.MapGet("/support", (IContentProvider content, IConfiguration config, CancellationToken ct) =>

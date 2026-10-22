@@ -1,12 +1,13 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { MicArt } from '@/components/icons';
 import { Button, Card, Screen } from '@/components/ui';
 import { t } from '@/i18n/ru';
 import { PRIVACY_URL } from '@/lib/api';
+import { ApiError } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import { colors, fonts, radius, shadow, spacing, type } from '@/theme';
 
@@ -15,6 +16,9 @@ export default function Onboarding() {
   const [agreed, setAgreed] = useState(false);
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
 
   useEffect(() => {
     AppleAuthentication.isAvailableAsync().then(setAppleAvailable);
@@ -25,7 +29,8 @@ export default function Onboarding() {
     try {
       await fn();
     } catch (e: any) {
-      if (e?.code !== 'ERR_REQUEST_CANCELED') Alert.alert(t.common.error, String(e?.message ?? e));
+      if (e instanceof ApiError && e.status === 401) Alert.alert(t.onboarding.wrongPassword);
+      else if (e?.code !== 'ERR_REQUEST_CANCELED') Alert.alert(t.common.error, String(e?.message ?? e));
     } finally {
       setBusy(false);
     }
@@ -82,6 +87,40 @@ export default function Onboarding() {
           onPress={() => run(session.signInDev)}
         />
       )}
+
+      {/* Username/password sign-in, used by App Review. Hidden behind a quiet link. */}
+      {showPassword ? (
+        <View style={{ gap: spacing(1) }}>
+          <TextInput
+            style={styles.input}
+            placeholder={t.onboarding.username}
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            value={username}
+            onChangeText={setUsername}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder={t.onboarding.password}
+            placeholderTextColor={colors.muted}
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+          />
+          <Button
+            label={t.onboarding.signIn}
+            variant="outline"
+            disabled={!agreed || !username || !password}
+            loading={busy}
+            onPress={() => run(() => session.signInWithPassword(username.trim(), password))}
+          />
+        </View>
+      ) : (
+        <Text style={[type.small, styles.quietLink]} onPress={() => setShowPassword(true)}>
+          {t.onboarding.reviewLogin}
+        </Text>
+      )}
     </Screen>
   );
 }
@@ -112,4 +151,16 @@ const styles = StyleSheet.create({
   checkOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   tick: { color: colors.white, fontSize: 12, fontFamily: fonts.bold },
   link: { color: colors.ink, textDecorationLine: 'underline' },
+  quietLink: { textAlign: 'center', paddingVertical: spacing(1) },
+  input: {
+    height: 52,
+    borderRadius: radius.input,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: spacing(2),
+    fontFamily: fonts.regular,
+    fontSize: 16,
+    color: colors.ink,
+  },
 });
