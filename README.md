@@ -67,8 +67,10 @@ cd mobile && npx tsc --noEmit
 
 ## Before App Store release
 
-- Apple Developer account. Set `Apple:BundleId` and `ios.bundleIdentifier` are `com.maksimsracins.govori`.
-- Deploy the API over HTTPS (Azure App Service / Fly.io), use managed Postgres, and replace `LocalAudioStorage` with S3/R2/Blob.
-- Production config: a strong `Jwt:Key`, `Auth:AllowDevLogin=false`, and EF migrations instead of `EnsureCreated`.
-- Host a privacy policy page that names OpenAI and Anthropic as processors.
-- `eas build -p ios --profile production`, then `eas submit -p ios`, then TestFlight, then review.
+Production runs on **Railway** (API, built from `backend/Dockerfile`) and **Supabase** (Postgres + Storage bucket `recordings`).
+Configuration is set as Railway variables: `ConnectionStrings__Db`, `Supabase__Url`, `Supabase__SecretKey`, `Jwt__Key`, `OpenAI__ApiKey`, `Anthropic__ApiKey`, `App__ContactEmail`, `Auth__AllowDevLogin`.
+
+- Bundle id: `com.maksimsracins.govori` (`mobile/app.json` and `Apple:BundleId`).
+- Privacy policy and support pages: `https://govori-production.up.railway.app/privacy` and `/support`. Their text is in `AppSettings` (`pages.privacy`, `pages.support`).
+- Build and submit from `mobile/`: `eas build -p ios --profile production`, then `eas submit -p ios --latest`. Then TestFlight, then review.
+- Before review, set `Auth__AllowDevLogin=false`.
