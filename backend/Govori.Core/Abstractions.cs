@@ -3,8 +3,11 @@ namespace Govori.Core;
 public interface IAudioStorage
 {
     Task SaveAsync(string key, Stream content, CancellationToken ct);
-    Stream OpenRead(string key);
-    void Delete(string key);
+
+    /// <summary>Returns a seekable stream so the API can serve HTTP range requests.</summary>
+    Task<Stream> OpenReadAsync(string key, CancellationToken ct);
+
+    Task DeleteAsync(string key, CancellationToken ct);
 }
 
 public interface ITranscriber

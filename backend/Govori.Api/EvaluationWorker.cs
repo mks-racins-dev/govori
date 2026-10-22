@@ -49,7 +49,7 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
         {
             if (attempt.Transcript is null)
             {
-                await using var audio = sp.GetRequiredService<IAudioStorage>().OpenRead(attempt.AudioKey);
+                await using var audio = await sp.GetRequiredService<IAudioStorage>().OpenReadAsync(attempt.AudioKey, ct);
                 attempt.Transcript = await sp.GetRequiredService<ITranscriber>().TranscribeAsync(audio, $"{attempt.Id}.m4a", ct);
                 await db.SaveChangesAsync(ct);
             }

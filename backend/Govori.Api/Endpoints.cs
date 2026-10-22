@@ -127,10 +127,10 @@ public static class Endpoints
                 a.DurationSec, a.CreatedAt, a.Transcript, a.FailureReason, stored?.Result, stored?.Metrics));
         });
 
-        g.MapGet("/{id:guid}/audio", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage) =>
+        g.MapGet("/{id:guid}/audio", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
             var a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId());
-            return a is null ? Results.NotFound() : Results.Stream(storage.OpenRead(a.AudioKey), "audio/mp4", enableRangeProcessing: true);
+            return a is null ? Results.NotFound() : Results.Stream(await storage.OpenReadAsync(a.AudioKey, ct), "audio/mp4", enableRangeProcessing: true);
         });
 
         g.MapPost("/{id:guid}/retry", async (Guid id, ClaimsPrincipal user, GovoriDbContext db) =>
@@ -146,12 +146,12 @@ public static class Endpoints
             return Results.NoContent();
         });
 
-        g.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage) =>
+        g.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
             var a = await db.Attempts.Include(x => x.Evaluation).FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId());
             if (a is null) return Results.NotFound();
 
-            storage.Delete(a.AudioKey);
+            await storage.DeleteAsync(a.AudioKey, ct);
             db.Attempts.Remove(a);
             await db.SaveChangesAsync();
             return Results.NoContent();
@@ -178,11 +178,11 @@ public static class Endpoints
         });
 
         // Required by App Store guideline 5.1.1(v): users must be able to delete their account in-app.
-        g.MapDelete("/", async (ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage) =>
+        g.MapDelete("/", async (ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
             var userId = user.UserId();
             var attempts = await db.Attempts.Include(a => a.Evaluation).Where(a => a.UserId == userId).ToListAsync();
-            foreach (var a in attempts) storage.Delete(a.AudioKey);
+            foreach (var a in attempts) await storage.DeleteAsync(a.AudioKey, ct);
             db.Attempts.RemoveRange(attempts);
             await db.Users.Where(u => u.Id == userId).ExecuteDeleteAsync();
             await db.SaveChangesAsync();
