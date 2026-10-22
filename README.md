@@ -67,7 +67,7 @@ cd mobile && npx tsc --noEmit
 
 ## Before App Store release
 
-- Apple Developer account. Set `Apple:BundleId` and `ios.bundleIdentifier` (now `com.govori.app`) to your own ID.
+- Apple Developer account. Set `Apple:BundleId` and `ios.bundleIdentifier` are `com.maksimsracins.govori`.
 - Deploy the API over HTTPS (Azure App Service / Fly.io), use managed Postgres, and replace `LocalAudioStorage` with S3/R2/Blob.
 - Production config: a strong `Jwt:Key`, `Auth:AllowDevLogin=false`, and EF migrations instead of `EnsureCreated`.
 - Host a privacy policy page that names OpenAI and Anthropic as processors.

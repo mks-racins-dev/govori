@@ -1,10 +1,12 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { MicArt } from '@/components/icons';
 import { Button, Card, Screen } from '@/components/ui';
 import { t } from '@/i18n/ru';
+import { PRIVACY_URL } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import { colors, fonts, radius, shadow, spacing, type } from '@/theme';
 
@@ -54,6 +56,9 @@ export default function Onboarding() {
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={[type.body, { fontFamily: fonts.medium }]}>{t.onboarding.agree}</Text>
           <Text style={type.small}>{t.onboarding.consent}</Text>
+          <Text style={[type.small, styles.link]} onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}>
+            {t.onboarding.privacy}
+          </Text>
         </View>
       </Pressable>
 
@@ -106,4 +111,5 @@ const styles = StyleSheet.create({
   },
   checkOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   tick: { color: colors.white, fontSize: 12, fontFamily: fonts.bold },
+  link: { color: colors.ink, textDecorationLine: 'underline' },
 });

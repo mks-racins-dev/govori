@@ -3,6 +3,8 @@ import { File } from 'expo-file-system';
 import { getToken } from './session';
 
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:5080';
+export const PRIVACY_URL = `${API_URL}/privacy`;
+export const SUPPORT_URL = `${API_URL}/support`;
 
 export type AttemptStatus = 'Recording' | 'Processing' | 'Done' | 'Failed';
 

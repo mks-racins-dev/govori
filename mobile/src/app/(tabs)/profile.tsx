@@ -1,10 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import * as WebBrowser from 'expo-web-browser';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ArrowIcon } from '@/components/icons';
 import { Card, Screen } from '@/components/ui';
 import { t } from '@/i18n/ru';
-import { api } from '@/lib/api';
+import { api, PRIVACY_URL, SUPPORT_URL } from '@/lib/api';
 import { useSession } from '@/lib/session';
 import { colors, spacing, type } from '@/theme';
 
@@ -54,6 +55,8 @@ export default function Profile() {
       </Card>
 
       <Card style={{ paddingVertical: spacing(0.5) }}>
+        <Row label={t.profile.support} onPress={() => WebBrowser.openBrowserAsync(SUPPORT_URL)} />
+        <Row label={t.profile.privacy} onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)} />
         <Row label={t.profile.signOut} onPress={signOut} />
         <Row label={t.profile.deleteAccount} onPress={deleteAccount} danger last />
       </Card>

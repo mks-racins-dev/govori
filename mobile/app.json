@@ -8,24 +8,24 @@
     "scheme": "govori",
     "userInterfaceStyle": "light",
     "ios": {
-      "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.govori.app",
+      "icon": "./assets/images/icon.png",
+      "bundleIdentifier": "com.maksimsracins.govori",
       "supportsTablet": false,
       "usesAppleSignIn": true,
       "infoPlist": {
         "CFBundleDevelopmentRegion": "ru",
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#111111",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.govori.app"
+      "package": "com.maksimsracins.govori"
     },
     "web": {
       "output": "single",
@@ -36,9 +36,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F2F2F4",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 160,
+          "backgroundColor": "#F2F2F4"
         }
       ],
       "expo-font",
@@ -52,7 +52,8 @@
         }
       ],
       "expo-secure-store",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": false,

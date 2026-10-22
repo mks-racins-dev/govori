@@ -26,6 +26,8 @@ public static class SettingDefaults
         [SettingKeys.FillersPhrases] = "как бы\nв общем\nэто самое\nтак сказать\nна самом деле\nв принципе\nто есть",
         [SettingKeys.EvaluationFailed] = "Не удалось проанализировать запись. Попробуйте ещё раз.",
         [SettingKeys.NoSpeech] = "Мы не услышали речь в этой записи. Проверьте микрофон и попробуйте ещё раз.",
+        [PageDefaults.PrivacyKey] = PageDefaults.Privacy,
+        [PageDefaults.SupportKey] = PageDefaults.Support,
     };
 
     public static string[] Lines(string value) =>
