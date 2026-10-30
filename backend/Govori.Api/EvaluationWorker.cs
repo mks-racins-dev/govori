@@ -20,21 +20,30 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            Guid? next;
-            using (var scope = scopes.CreateScope())
+            // An exception escaping ExecuteAsync stops the whole host, so a database blip must not leave this loop.
+            try
             {
-                var db = scope.ServiceProvider.GetRequiredService<GovoriDbContext>();
-                next = await db.Attempts.Where(a => a.Status == AttemptStatus.Processing)
-                    .OrderBy(a => a.CreatedAt).Select(a => (Guid?)a.Id).FirstOrDefaultAsync(stoppingToken);
-            }
+                Guid? next;
+                using (var scope = scopes.CreateScope())
+                {
+                    var db = scope.ServiceProvider.GetRequiredService<GovoriDbContext>();
+                    next = await db.Attempts.Where(a => a.Status == AttemptStatus.Processing)
+                        .OrderBy(a => a.CreatedAt).Select(a => (Guid?)a.Id).FirstOrDefaultAsync(stoppingToken);
+                }
 
-            if (next is null)
+                if (next is null)
+                {
+                    await Signal.WaitAsync(TimeSpan.FromSeconds(10), stoppingToken);
+                    continue;
+                }
+
+                await ProcessAsync(next.Value, stoppingToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await Signal.WaitAsync(TimeSpan.FromSeconds(10), stoppingToken);
-                continue;
+                log.LogError(ex, "Evaluation worker loop failed; retrying shortly");
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
             }
-
-            await ProcessAsync(next.Value, stoppingToken);
         }
     }
 

@@ -17,7 +17,7 @@ if (Environment.GetEnvironmentVariable("PORT") is { Length: > 0 } port)
 if (string.IsNullOrWhiteSpace(config["Jwt:Key"]) || config["Jwt:Key"]!.Length < 32)
     throw new InvalidOperationException("Jwt:Key must be set to a random string of at least 32 characters.");
 
-builder.Services.AddDbContext<GovoriDbContext>(o => o.UseNpgsql(config.GetConnectionString("Db")));
+builder.Services.AddDbContext<GovoriDbContext>(o => o.UseNpgsql(config.GetConnectionString("Db"), npgsql => npgsql.EnableRetryOnFailure()));
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // Supabase Storage when configured (production); local disk otherwise (development).

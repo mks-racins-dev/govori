@@ -36,7 +36,8 @@ public class AppleTokenValidator(IConfiguration config)
     public async Task<string> ValidateAsync(string identityToken, CancellationToken ct)
     {
         var oidc = await _apple.GetConfigurationAsync(ct);
-        var result = await new JwtSecurityTokenHandler().ValidateTokenAsync(identityToken, new TokenValidationParameters
+        // MapInboundClaims = false keeps "sub" as "sub" instead of renaming it to ClaimTypes.NameIdentifier.
+        var result = await new JwtSecurityTokenHandler { MapInboundClaims = false }.ValidateTokenAsync(identityToken, new TokenValidationParameters
         {
             ValidIssuer = "https://appleid.apple.com",
             ValidAudience = config["Apple:BundleId"],
