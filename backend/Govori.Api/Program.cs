@@ -44,7 +44,7 @@ if (string.IsNullOrWhiteSpace(anthropicKey))
 else
     builder.Services.AddHttpClient<ISpeechEvaluator, ClaudeEvaluator>((http, sp) =>
         new ClaudeEvaluator(http, sp.GetRequiredService<IContentProvider>(), anthropicKey,
-            config["Anthropic:Model"] ?? "claude-sonnet-5-5"));
+            config["Anthropic:Model"] ?? "claude-haiku-5-5"));
 
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IContentProvider, DbContentProvider>();
