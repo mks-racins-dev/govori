@@ -88,3 +88,4 @@ app.MapAttemptEndpoints();
 app.MapMeEndpoints();
 
 app.Run();
+public partial class Program;

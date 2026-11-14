@@ -4,9 +4,11 @@ import { ActivityIndicator, FlatList, ScrollView, StyleSheet, Text, View } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AttemptRow } from '@/components/attempt-row';
+import { ProgressChart } from '@/components/progress-chart';
 import { Muted, Pill } from '@/components/ui';
 import { t } from '@/i18n/ru';
 import { api } from '@/lib/api';
+import { buildProgress } from '@/lib/progress';
 import { useCategories } from '@/lib/use-categories';
 import { colors, radius, shadow, spacing, type } from '@/theme';
 
@@ -15,6 +17,7 @@ export default function History() {
   const [filter, setFilter] = useState<string | null>(null);
   const categories = useCategories();
   const data = (attempts.data ?? []).filter((a) => !filter || a.category === filter);
+  const progress = buildProgress(data);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -32,6 +35,7 @@ export default function History() {
                 <Pill key={c.name} label={c.name} active={filter === c.name} onPress={() => setFilter(c.name)} />
               ))}
             </ScrollView>
+            {progress && <ProgressChart progress={progress} />}
           </View>
         }
         ListEmptyComponent={

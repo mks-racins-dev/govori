@@ -94,6 +94,9 @@ export const ru = {
     all: 'Все',
     processing: 'Анализ…',
     failed: 'Ошибка',
+    progress: 'Ваш прогресс',
+    perWeeks: 'за {n} нед.',
+    perAttempts: 'за последние {n}',
   },
   profile: {
     title: 'Профиль',

@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="Govori.Api/Govori.Api.csproj" />
   <Project Path="Govori.Core/Govori.Core.csproj" />
+  <Project Path="Govori.E2ETests/Govori.E2ETests.csproj" />
   <Project Path="Govori.Infrastructure/Govori.Infrastructure.csproj" />
   <Project Path="Govori.Tests/Govori.Tests.csproj" />
 </Solution>

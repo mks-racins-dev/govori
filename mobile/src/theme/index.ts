@@ -12,6 +12,7 @@ export const colors = {
   fill: '#F2F2F4',
   accent: '#7D9CD3', // soft blue for "new" badges and highlights
   accentTint: '#E8EEF9',
+  chart: '#2F5BEA', // progress chart line and latest point
   success: '#3A9E6F',
   danger: '#E5484D',
   white: '#FFFFFF',
