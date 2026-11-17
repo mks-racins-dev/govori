@@ -129,7 +129,7 @@ public static class Endpoints
 
         g.MapGet("/{id:guid}/audio", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
-            var a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId());
+            var a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId(), ct);
             return a is null ? Results.NotFound() : Results.Stream(await storage.OpenReadAsync(a.AudioKey, ct), "audio/mp4", enableRangeProcessing: true);
         });
 
@@ -148,12 +148,12 @@ public static class Endpoints
 
         g.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
-            var a = await db.Attempts.Include(x => x.Evaluation).FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId());
+            var a = await db.Attempts.Include(x => x.Evaluation).FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId(), ct);
             if (a is null) return Results.NotFound();
 
             await storage.DeleteAsync(a.AudioKey, ct);
             db.Attempts.Remove(a);
-            await db.SaveChangesAsync();
+            await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
     }
@@ -181,11 +181,11 @@ public static class Endpoints
         g.MapDelete("/", async (ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
             var userId = user.UserId();
-            var attempts = await db.Attempts.Include(a => a.Evaluation).Where(a => a.UserId == userId).ToListAsync();
+            var attempts = await db.Attempts.Include(a => a.Evaluation).Where(a => a.UserId == userId).ToListAsync(ct);
             foreach (var a in attempts) await storage.DeleteAsync(a.AudioKey, ct);
             db.Attempts.RemoveRange(attempts);
-            await db.Users.Where(u => u.Id == userId).ExecuteDeleteAsync();
-            await db.SaveChangesAsync();
+            await db.Users.Where(u => u.Id == userId).ExecuteDeleteAsync(ct);
+            await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
     }
