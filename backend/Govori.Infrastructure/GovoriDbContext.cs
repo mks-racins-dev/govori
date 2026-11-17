@@ -13,16 +13,16 @@ public class GovoriDbContext(DbContextOptions<GovoriDbContext> options) : DbCont
     public DbSet<UiText> UiTexts => Set<UiText>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
 
-    protected override void OnModelCreating(ModelBuilder b)
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        b.Entity<User>().HasIndex(u => u.AppleSub).IsUnique();
-        b.Entity<Category>().HasIndex(c => c.Name).IsUnique();
-        b.Entity<Topic>().HasIndex(t => new { t.CategoryId, t.Text }).IsUnique();
-        b.Entity<Evaluation>().HasKey(e => e.AttemptId);
-        b.Entity<Evaluation>().Property(e => e.Json).HasColumnType("jsonb");
-        b.Entity<Attempt>().HasOne(a => a.Evaluation).WithOne().HasForeignKey<Evaluation>(e => e.AttemptId);
-        b.Entity<Attempt>().HasIndex(a => new { a.UserId, a.CreatedAt });
-        b.Entity<UiText>().HasKey(t => new { t.Locale, t.Key });
-        b.Entity<AppSetting>().HasKey(s => s.Key);
+        modelBuilder.Entity<User>().HasIndex(u => u.AppleSub).IsUnique();
+        modelBuilder.Entity<Category>().HasIndex(c => c.Name).IsUnique();
+        modelBuilder.Entity<Topic>().HasIndex(t => new { t.CategoryId, t.Text }).IsUnique();
+        modelBuilder.Entity<Evaluation>().HasKey(e => e.AttemptId);
+        modelBuilder.Entity<Evaluation>().Property(e => e.Json).HasColumnType("jsonb");
+        modelBuilder.Entity<Attempt>().HasOne(a => a.Evaluation).WithOne().HasForeignKey<Evaluation>(e => e.AttemptId);
+        modelBuilder.Entity<Attempt>().HasIndex(a => new { a.UserId, a.CreatedAt });
+        modelBuilder.Entity<UiText>().HasKey(t => new { t.Locale, t.Key });
+        modelBuilder.Entity<AppSetting>().HasKey(s => s.Key);
     }
 }

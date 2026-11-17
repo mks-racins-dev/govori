@@ -105,8 +105,11 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
                     ["type"] = "object",
                     ["properties"] = new JsonObject
                     {
-                        ["structure"] = Score(), ["relevance"] = Score(), ["vocabulary"] = Score(),
-                        ["fluency"] = Score(), ["pace"] = Score(),
+                        ["structure"] = Score(),
+                        ["relevance"] = Score(),
+                        ["vocabulary"] = Score(),
+                        ["fluency"] = Score(),
+                        ["pace"] = Score(),
                     },
                     ["required"] = new JsonArray("structure", "relevance", "vocabulary", "fluency", "pace"),
                     ["additionalProperties"] = false,

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -5,7 +6,7 @@ using System.Text.Json;
 namespace Govori.E2ETests;
 
 /// <summary>End-to-end scenarios the mobile app goes through, over real HTTP and a real database.</summary>
-[Collection(ApiCollection.Name)]
+[Collection(ApiTestGroup.Name)]
 public class ApiFlowTests(ApiFixture api)
 {
     private static readonly byte[] FakeAudio = Enumerable.Range(0, 4096).Select(i => (byte)i).ToArray();
@@ -107,7 +108,7 @@ public class ApiFlowTests(ApiFixture api)
 
         var scores = (await http.GetFromJsonAsync<JsonElement>("/attempts")).EnumerateArray()
             .Select(a => a.GetProperty("score").GetInt32()).ToArray();
-        Assert.Equal(new[] { 9, 7, 6, 5 }, scores);
+        Assert.Equal([9, 7, 6, 5], scores);
 
         var me = await http.GetFromJsonAsync<JsonElement>("/me");
         Assert.Equal(6.8, me.GetProperty("averageScore").GetDouble());
@@ -164,7 +165,7 @@ public class ApiFlowTests(ApiFixture api)
         var http = await api.SignIn();
         var topicId = await TopicId(http);
 
-        var noAudio = new MultipartFormDataContent { { new StringContent(topicId.ToString()), "topicId" }, { new StringContent("60"), "durationSec" } };
+        var noAudio = new MultipartFormDataContent { { new StringContent(topicId.ToString(CultureInfo.InvariantCulture)), "topicId" }, { new StringContent("60"), "durationSec" } };
         Assert.Equal(HttpStatusCode.BadRequest, (await http.PostAsync("/attempts", noAudio)).StatusCode);
 
         Assert.Equal(HttpStatusCode.BadRequest, (await http.PostAsync("/attempts", Form(999_999, 60))).StatusCode);
@@ -204,8 +205,8 @@ public class ApiFlowTests(ApiFixture api)
         return new MultipartFormDataContent
         {
             { file, "audio", "recording.m4a" },
-            { new StringContent(topicId.ToString()), "topicId" },
-            { new StringContent(durationSec.ToString()), "durationSec" },
+            { new StringContent(topicId.ToString(CultureInfo.InvariantCulture)), "topicId" },
+            { new StringContent(durationSec.ToString(CultureInfo.InvariantCulture)), "durationSec" },
         };
     }
 

@@ -99,7 +99,7 @@ public sealed class ApiFixture : IAsyncLifetime
 }
 
 [CollectionDefinition(Name)]
-public class ApiCollection : ICollectionFixture<ApiFixture>
+public class ApiTestGroup : ICollectionFixture<ApiFixture>
 {
     public const string Name = "api";
 }
@@ -120,13 +120,14 @@ public sealed class FakeEvaluator : ISpeechEvaluator
 {
     private int _failuresLeft;
     public int Score { get; set; } = 8;
-    public int Calls;
+    private int _calls;
+    public int Calls => Volatile.Read(ref _calls);
 
     public void FailNext(int times) => _failuresLeft = times;
 
     public Task<EvaluationResult> EvaluateAsync(string topic, string transcript, SpeechMetrics metrics, CancellationToken ct)
     {
-        Interlocked.Increment(ref Calls);
+        Interlocked.Increment(ref _calls);
         if (Interlocked.Decrement(ref _failuresLeft) >= 0) throw new HttpRequestException("AI provider is down (simulated)");
         return Task.FromResult(new EvaluationResult(Score, new SubScores(8, 9, 7, 8, 8), "Хорошее выступление.",
             ["Чёткий старт"], ["Меньше «ну»"], ["Начинайте с главной мысли"]));

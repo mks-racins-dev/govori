@@ -25,7 +25,7 @@ public static partial class SpeechAnalyzer
 
         foreach (var phrase in phraseFillers)
         {
-            var count = Regex.Matches(text, $@"(?<!\p{{L}}){Regex.Escape(phrase)}(?!\p{{L}})").Count;
+            var count = Regex.Count(text, $@"(?<!\p{{L}}){Regex.Escape(phrase)}(?!\p{{L}})");
             if (count > 0) fillers[phrase] = count;
         }
 

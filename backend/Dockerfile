@@ -1,10 +1,11 @@
 # Build and run the Govori API. Railway builds this file from the backend/ directory.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
-COPY Govori.Core/Govori.Core.csproj Govori.Core/
-COPY Govori.Infrastructure/Govori.Infrastructure.csproj Govori.Infrastructure/
-COPY Govori.Api/Govori.Api.csproj Govori.Api/
-RUN dotnet restore Govori.Api/Govori.Api.csproj
+COPY global.json Directory.Build.props Directory.Packages.props .editorconfig ./
+COPY Govori.Core/Govori.Core.csproj Govori.Core/packages.lock.json Govori.Core/
+COPY Govori.Infrastructure/Govori.Infrastructure.csproj Govori.Infrastructure/packages.lock.json Govori.Infrastructure/
+COPY Govori.Api/Govori.Api.csproj Govori.Api/packages.lock.json Govori.Api/
+RUN dotnet restore Govori.Api/Govori.Api.csproj --locked-mode
 COPY . .
 RUN dotnet publish Govori.Api/Govori.Api.csproj -c Release -o /app --no-restore
 
