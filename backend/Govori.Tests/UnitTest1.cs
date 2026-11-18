@@ -85,4 +85,11 @@ public class ClaudeEvaluatorTests
         Assert.Throws<InvalidOperationException>(() =>
             ClaudeEvaluator.ParseResponse("""{"stop_reason":"refusal","content":[]}"""));
     }
+
+    [Fact]
+    public void Deliberate_failing_test_for_ci_validation()
+    {
+        // This test deliberately fails to validate that CI blocks broken code
+            Assert.True(false, "CI should block this PR");
+    }
 }
