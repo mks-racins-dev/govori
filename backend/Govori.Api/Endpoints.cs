@@ -194,7 +194,14 @@ public static class Endpoints
 
     private static IResult Reject(ILogger log, string reason)
     {
-        log.LogWarning("Upload rejected: {Reason}", reason);
+        var safeReason = new string(
+            reason
+                .Replace('\r', ' ')
+                .Replace('\n', ' ')
+                .Select(c => char.IsControl(c) ? ' ' : c)
+                .ToArray());
+
+        log.LogWarning("Upload rejected: {Reason}", safeReason);
         return Results.BadRequest(new { error = reason });
     }
 
