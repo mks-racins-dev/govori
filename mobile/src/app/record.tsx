@@ -100,6 +100,16 @@ export default function RecordScreen() {
     upload();
   }
 
+  // Discard the recording without uploading: nothing reaches the server or the AI.
+  async function cancel() {
+    if (stopping.current) return;
+    stopping.current = true;
+    result.current = null;
+    await recorder.stop().catch(() => {});
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+    router.replace('/');
+  }
+
   async function upload() {
     if (!result.current) return;
     setPhase('uploading');
@@ -166,6 +176,7 @@ export default function RecordScreen() {
         <View style={styles.footer}>
           <Button label={t.record.stop} onPress={finish} disabled={!canStop || phase !== 'recording'} />
           <Muted style={{ textAlign: 'center', opacity: canStop ? 0 : 1 }}>{t.record.minDuration}</Muted>
+          <Button label={t.record.discard} variant="outline" onPress={cancel} disabled={phase !== 'recording'} />
         </View>
       }>
       <View style={styles.top}>
