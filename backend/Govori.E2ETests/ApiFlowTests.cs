@@ -91,7 +91,9 @@ public class ApiFlowTests(ApiFixture api)
         var review = await http.GetAsync($"/attempts/{id}/review-audio");
         Assert.Equal(HttpStatusCode.OK, review.StatusCode);
         Assert.Equal("audio/mpeg", review.Content.Headers.ContentType?.MediaType);
-        Assert.StartsWith("review#", Encoding.UTF8.GetString(await review.Content.ReadAsByteArrayAsync()), StringComparison.Ordinal);
+        var spokenReview = Encoding.UTF8.GetString(await review.Content.ReadAsByteArrayAsync());
+        Assert.StartsWith("review#", spokenReview, StringComparison.Ordinal);
+        Assert.Equal(spokenReview, detail.GetProperty("reviewText").GetString());
         Assert.Single(ReviewFiles(id));
 
         // Delete removes the recording and the review audio.
@@ -181,6 +183,31 @@ public class ApiFlowTests(ApiFixture api)
         finally { api.Synthesizer.FailNext(0); }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Review_provider_timeouts_do_not_fail_the_attempt(bool writerTimeout)
+    {
+        var http = await api.SignIn();
+        if (writerTimeout) api.ReviewWriter.TimeoutNext(1);
+        else api.Synthesizer.TimeoutNext(1);
+
+        try
+        {
+            var detail = await WaitForStatus(http, await Upload(http, await TopicId(http), 60), "Done");
+            Assert.Equal(8, detail.GetProperty("evaluation").GetProperty("score").GetInt32());
+            Assert.Equal(writerTimeout, detail.GetProperty("hasReviewAudio").GetBoolean());
+            Assert.False(string.IsNullOrWhiteSpace(detail.GetProperty("reviewText").GetString()));
+            if (writerTimeout)
+                Assert.StartsWith("Хорошо, думаю, 8 из 10.", detail.GetProperty("reviewText").GetString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            api.ReviewWriter.TimeoutNext(0);
+            api.Synthesizer.TimeoutNext(0);
+        }
+    }
+
     [Fact]
     public async Task Failed_evaluation_can_be_retried()
     {
@@ -267,6 +294,43 @@ public class ApiFlowTests(ApiFixture api)
         var again = await api.SignIn(device);
         Assert.Empty((await again.GetFromJsonAsync<JsonElement>("/attempts")).EnumerateArray());
         Assert.Equal(HttpStatusCode.NotFound, (await again.GetAsync($"/attempts/{id}")).StatusCode);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Deleting_during_review_synthesis_waits_and_removes_audio(bool deleteAccount)
+    {
+        var device = Guid.NewGuid().ToString();
+        var http = await api.SignIn(device);
+        var id = await Upload(http, await TopicId(http), 60);
+        var gate = api.Synthesizer.BlockNext();
+        await gate.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var deletion = deleteAccount
+            ? http.DeleteAsync("/me")
+            : http.DeleteAsync($"/attempts/{id}");
+        try
+        {
+            await Task.Delay(100);
+            Assert.False(deletion.IsCompleted);
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        Assert.Equal(HttpStatusCode.NoContent, (await deletion).StatusCode);
+        Assert.Empty(ReviewFiles(id));
+        if (deleteAccount)
+        {
+            var again = await api.SignIn(device);
+            Assert.Equal(HttpStatusCode.NotFound, (await again.GetAsync($"/attempts/{id}")).StatusCode);
+        }
+        else
+        {
+            Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"/attempts/{id}")).StatusCode);
+        }
     }
 
     private static MultipartFormDataContent Form(int topicId, int durationSec)

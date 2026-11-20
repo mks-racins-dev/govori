@@ -15,7 +15,8 @@ public static class Endpoints
     public record AttemptSummary(Guid Id, string Topic, string Category, AttemptStatus Status, int? Score, int DurationSec, DateTime CreatedAt);
     public record AttemptDetail(
         Guid Id, TopicDto Topic, AttemptStatus Status, int DurationSec, DateTime CreatedAt,
-        string? Transcript, string? FailureReason, EvaluationResult? Evaluation, SpeechMetrics? Metrics, bool HasReviewAudio);
+        string? Transcript, string? FailureReason, EvaluationResult? Evaluation, SpeechMetrics? Metrics,
+        string? ReviewText, bool HasReviewAudio);
     public record MeDto(int Attempts, double? AverageScore, int? BestScore, int StreakDays);
 
     public record CategoryDto(string Name, string Description, string? Badge);
@@ -124,7 +125,8 @@ public static class Endpoints
 
             var stored = a.Evaluation is null ? null : JsonSerializer.Deserialize<StoredEvaluation>(a.Evaluation.Json, Json);
             return Results.Ok(new AttemptDetail(a.Id, new TopicDto(a.Topic!.Id, a.Topic.Text, a.Topic.Category!.Name), a.Status,
-                a.DurationSec, a.CreatedAt, a.Transcript, a.FailureReason, stored?.Result, stored?.Metrics, a.ReviewAudioKey != null));
+                a.DurationSec, a.CreatedAt, a.Transcript, a.FailureReason, stored?.Result, stored?.Metrics,
+                a.ReviewText, a.ReviewAudioKey != null));
         });
 
         g.MapGet("/{id:guid}/audio", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
@@ -156,14 +158,22 @@ public static class Endpoints
 
         g.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
-            var a = await db.Attempts.Include(x => x.Evaluation).FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId(), ct);
-            if (a is null) return Results.NotFound();
+            await EvaluationWorker.ProcessingLock.WaitAsync(ct);
+            try
+            {
+                var a = await db.Attempts.Include(x => x.Evaluation).FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId(), ct);
+                if (a is null) return Results.NotFound();
 
-            await storage.DeleteAsync(a.AudioKey, ct);
-            if (a.ReviewAudioKey is not null) await storage.DeleteAsync(a.ReviewAudioKey, ct);
-            db.Attempts.Remove(a);
-            await db.SaveChangesAsync(ct);
-            return Results.NoContent();
+                await storage.DeleteAsync(a.AudioKey, ct);
+                if (a.ReviewAudioKey is not null) await storage.DeleteAsync(a.ReviewAudioKey, ct);
+                db.Attempts.Remove(a);
+                await db.SaveChangesAsync(ct);
+                return Results.NoContent();
+            }
+            finally
+            {
+                EvaluationWorker.ProcessingLock.Release();
+            }
         });
     }
 
@@ -189,17 +199,25 @@ public static class Endpoints
         // Required by App Store guideline 5.1.1(v): users must be able to delete their account in-app.
         g.MapDelete("/", async (ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
-            var userId = user.UserId();
-            var attempts = await db.Attempts.Include(a => a.Evaluation).Where(a => a.UserId == userId).ToListAsync(ct);
-            foreach (var a in attempts)
+            await EvaluationWorker.ProcessingLock.WaitAsync(ct);
+            try
             {
-                await storage.DeleteAsync(a.AudioKey, ct);
-                if (a.ReviewAudioKey is not null) await storage.DeleteAsync(a.ReviewAudioKey, ct);
+                var userId = user.UserId();
+                var attempts = await db.Attempts.Include(a => a.Evaluation).Where(a => a.UserId == userId).ToListAsync(ct);
+                foreach (var a in attempts)
+                {
+                    await storage.DeleteAsync(a.AudioKey, ct);
+                    if (a.ReviewAudioKey is not null) await storage.DeleteAsync(a.ReviewAudioKey, ct);
+                }
+                db.Attempts.RemoveRange(attempts);
+                await db.Users.Where(u => u.Id == userId).ExecuteDeleteAsync(ct);
+                await db.SaveChangesAsync(ct);
+                return Results.NoContent();
             }
-            db.Attempts.RemoveRange(attempts);
-            await db.Users.Where(u => u.Id == userId).ExecuteDeleteAsync(ct);
-            await db.SaveChangesAsync(ct);
-            return Results.NoContent();
+            finally
+            {
+                EvaluationWorker.ProcessingLock.Release();
+            }
         });
     }
 
