@@ -122,6 +122,20 @@ export function ArrowIcon({ size = 18, color = '#111' }: IconProps) {
   );
 }
 
+export function ChevronIcon({ size = 16, color = '#111', up = false }: IconProps & { up?: boolean }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d={up ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'}
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
 /** The reference's black disc with an offset white circle. */
 export function DiscArt({ size = 64 }: { size?: number }) {
   return (

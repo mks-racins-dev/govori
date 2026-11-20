@@ -38,6 +38,12 @@ else
         new OpenAiTranscriber(http, sp.GetRequiredService<IContentProvider>(), openAiKey,
             config["OpenAI:TranscribeModel"] ?? "gpt-4o-transcribe"));
 
+// The spoken review needs OpenAI too; without a key the app shows the text review only.
+if (!string.IsNullOrWhiteSpace(openAiKey))
+    builder.Services.AddHttpClient<ISpeechSynthesizer, OpenAiSpeechSynthesizer>((http, sp) =>
+        new OpenAiSpeechSynthesizer(http, sp.GetRequiredService<IContentProvider>(), openAiKey,
+            config["OpenAI:TtsModel"] ?? "gpt-4o-mini-tts", config["OpenAI:TtsVoice"] ?? "alloy"));
+
 var anthropicKey = config["Anthropic:ApiKey"];
 if (string.IsNullOrWhiteSpace(anthropicKey))
     builder.Services.AddSingleton<ISpeechEvaluator, MockSpeechEvaluator>();
@@ -45,6 +51,13 @@ else
     builder.Services.AddHttpClient<ISpeechEvaluator, ClaudeEvaluator>((http, sp) =>
         new ClaudeEvaluator(http, sp.GetRequiredService<IContentProvider>(), anthropicKey,
             config["Anthropic:Model"] ?? "claude-haiku-5-5"));
+
+if (string.IsNullOrWhiteSpace(anthropicKey))
+    builder.Services.AddSingleton<IReviewWriter, TemplateReviewWriter>();
+else
+    builder.Services.AddHttpClient<IReviewWriter, ClaudeReviewWriter>((http, sp) =>
+        new ClaudeReviewWriter(http, sp.GetRequiredService<IContentProvider>(), anthropicKey,
+            config["Anthropic:ReviewModel"] ?? config["Anthropic:Model"] ?? "claude-haiku-5-5"));
 
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IContentProvider, DbContentProvider>();

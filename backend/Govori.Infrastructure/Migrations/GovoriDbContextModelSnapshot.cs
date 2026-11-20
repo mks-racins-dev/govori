@@ -55,6 +55,12 @@ namespace Govori.Infrastructure.Migrations
                     b.Property<string>("FailureReason")
                         .HasColumnType("text");
 
+                    b.Property<string>("ReviewAudioKey")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReviewText")
+                        .HasColumnType("text");
+
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 

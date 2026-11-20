@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { AttemptPlayer } from '@/components/audio-player';
-import { TrashIcon } from '@/components/icons';
+import { AttemptPlayer, ReviewPlayer } from '@/components/audio-player';
+import { ChevronIcon, TrashIcon } from '@/components/icons';
 import { Badge, Button, Card, Centered, Header, Muted, Screen } from '@/components/ui';
 import { t } from '@/i18n/ru';
-import { api, AttemptDetail, SubScores } from '@/lib/api';
+import { api, Evaluation, SubScores } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { colors, fonts, radius, spacing, type } from '@/theme';
 
@@ -124,13 +125,7 @@ export default function AttemptScreen() {
         </View>
       )}
 
-      {ev && (
-        <>
-          <ListCard title={t.result.strengths} items={ev.strengths} mark="+" />
-          <ListCard title={t.result.improvements} items={ev.improvements} mark="–" />
-          <ListCard title={t.result.suggestions} items={ev.suggestions} mark="→" />
-        </>
-      )}
+      {ev && <ReviewCard attemptId={data.id} evaluation={ev} hasAudio={data.hasReviewAudio} />}
 
       {!!data.transcript && (
         <Card style={{ gap: spacing(1.5) }}>
@@ -161,11 +156,38 @@ function SubScoreBars({ scores }: { scores: SubScores }) {
   );
 }
 
-function ListCard({ title, items, mark }: { title: string; items: string[]; mark: string }) {
+/** The AI coach's spoken review, with the written version behind a toggle. */
+function ReviewCard({ attemptId, evaluation, hasAudio }: { attemptId: string; evaluation: Evaluation; hasAudio: boolean }) {
+  // Without a voice-over (older attempts, TTS unavailable) the text is the only review, so show it right away.
+  const [open, setOpen] = useState(!hasAudio);
+  return (
+    <Card style={{ gap: spacing(2) }}>
+      <Text style={type.overline}>{t.result.review}</Text>
+      {hasAudio && <ReviewPlayer attemptId={attemptId} />}
+      {hasAudio && (
+        <Pressable
+          onPress={() => setOpen((v) => !v)}
+          style={({ pressed }) => [styles.toggle, { opacity: pressed ? 0.7 : 1 }]}>
+          <Text style={styles.toggleText}>{open ? t.result.hideReview : t.result.showReview}</Text>
+          <ChevronIcon up={open} color={colors.ink} />
+        </Pressable>
+      )}
+      {open && (
+        <View style={{ gap: spacing(2.5) }}>
+          <ReviewList title={t.result.strengths} items={evaluation.strengths} mark="+" />
+          <ReviewList title={t.result.improvements} items={evaluation.improvements} mark="–" />
+          <ReviewList title={t.result.suggestions} items={evaluation.suggestions} mark="→" />
+        </View>
+      )}
+    </Card>
+  );
+}
+
+function ReviewList({ title, items, mark }: { title: string; items: string[]; mark: string }) {
   if (items.length === 0) return null;
   return (
-    <Card style={{ gap: spacing(1.75) }}>
-      <Text style={type.overline}>{title}</Text>
+    <View style={{ gap: spacing(1.5) }}>
+      <Text style={type.heading}>{title}</Text>
       {items.map((item) => (
         <View key={item} style={styles.item}>
           <View style={styles.mark}>
@@ -174,7 +196,7 @@ function ListCard({ title, items, mark }: { title: string; items: string[]; mark
           <Text style={[type.body, { flex: 1 }]}>{item}</Text>
         </View>
       ))}
-    </Card>
+    </View>
   );
 }
 
@@ -250,6 +272,17 @@ const styles = StyleSheet.create({
     marginTop: -1,
   },
   markText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.ink },
+  toggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing(1),
+    paddingVertical: spacing(1.75),
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  toggleText: { fontFamily: fonts.medium, fontSize: 15, color: colors.ink },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing(1) },
   chip: { backgroundColor: colors.accentTint, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 6 },
   chipText: { fontFamily: fonts.medium, fontSize: 13, color: colors.accent },

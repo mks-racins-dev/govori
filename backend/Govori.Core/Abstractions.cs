@@ -20,6 +20,23 @@ public interface ISpeechEvaluator
     Task<EvaluationResult> EvaluateAsync(string topic, string transcript, SpeechMetrics metrics, CancellationToken ct);
 }
 
+/// <summary>Turns text into speech (MP3). Used for the spoken AI review.</summary>
+public interface ISpeechSynthesizer
+{
+    Task<byte[]> SynthesizeAsync(string text, CancellationToken ct);
+}
+
+/// <summary>Writes the informal text the AI coach speaks about an attempt.</summary>
+public interface IReviewWriter
+{
+    Task<string> WriteAsync(ReviewContext context, CancellationToken ct);
+}
+
+/// <param name="Previous">The user's previous evaluated attempt, if any.</param>
+/// <param name="RecentReviews">Recently spoken reviews, newest first, so the new one can avoid repeating them.</param>
+public record ReviewContext(
+    string Topic, EvaluationResult Current, SpeechMetrics Metrics, EvaluationResult? Previous, IReadOnlyList<string> RecentReviews);
+
 /// <summary>Reads server-side texts (prompts, word lists) from the database.</summary>
 public interface IContentProvider
 {
@@ -34,6 +51,8 @@ public static class SettingKeys
     public const string FillersPhrases = "fillers.phrases"; // one phrase per line
     public const string EvaluationFailed = "errors.evaluationFailed";
     public const string NoSpeech = "errors.noSpeech";
+    public const string ReviewSystemPrompt = "review.systemPrompt";
+    public const string ReviewVoiceInstructions = "review.voiceInstructions";
 }
 
 public record SpeechMetrics(int DurationSec, int WordCount, int WordsPerMinute, Dictionary<string, int> FillerWords)
@@ -52,3 +71,36 @@ public record EvaluationResult(
     List<string> Suggestions);
 
 public record StoredEvaluation(EvaluationResult Result, SpeechMetrics Metrics);
+
+/// <summary>Fallback review used when no AI writer is available.</summary>
+public static class ReviewScript
+{
+    public static string Build(EvaluationResult r, EvaluationResult? previous = null)
+    {
+        var verdict = ScoreTier(r.Score);
+        var opening = previous is null ? $"{verdict}, думаю, {r.Score} из 10."
+            : r.Score > previous.Score ? $"Уже лучше, чем в прошлый раз! {r.Score} из 10."
+            : r.Score < previous.Score ? $"В этот раз чуть слабее, {r.Score} из 10, но это нормально."
+            : $"Стабильно: снова {r.Score} из 10.";
+        var parts = new List<string> { opening, r.Summary };
+        if (r.Strengths.Count > 0) parts.Add("Особенно понравилось: " + Lower(r.Strengths[0]));
+        if (r.Improvements.Count > 0) parts.Add("В следующий раз обрати внимание: " + Lower(r.Improvements[0]));
+        return string.Join("\n\n", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+    }
+
+    /// <summary>How a score sounds in words; shared with the AI prompt so both use one scale.</summary>
+    public static string ScoreTier(int score) => score switch
+    {
+        <= 2 => "Пока тяжеловато",
+        <= 4 => "Есть над чем поработать",
+        <= 6 => "Неплохо",
+        <= 8 => "Хорошо",
+        _ => "Отлично",
+    };
+
+    private static string Lower(string s)
+    {
+        s = s.Trim().TrimEnd('.', ';');
+        return s.Length == 0 ? s : char.ToLowerInvariant(s[0]) + s[1..] + ".";
+    }
+}

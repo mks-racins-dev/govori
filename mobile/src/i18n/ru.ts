@@ -81,6 +81,9 @@ export const ru = {
     words: 'слов',
     again: 'Ещё тема',
     deleteConfirm: 'Удалить это выступление?',
+    review: 'Аудиоразбор',
+    showReview: 'Показать текст разбора',
+    hideReview: 'Скрыть текст разбора',
     subScores: {
       structure: 'Структура',
       relevance: 'По теме',

@@ -19,6 +19,17 @@ export function AttemptPlayer({ attemptId, fallbackDuration }: { attemptId: stri
   return source ? <Player source={source} seed={attemptId} fallbackDuration={fallbackDuration} /> : null;
 }
 
+/** Plays the AI coach's spoken review of an attempt. */
+export function ReviewPlayer({ attemptId }: { attemptId: string }) {
+  const [source, setSource] = useState<AudioSource | null>(null);
+
+  useEffect(() => {
+    api.reviewAudioSource(attemptId).then(setSource);
+  }, [attemptId]);
+
+  return source ? <Player source={source} seed={`review-${attemptId}`} fallbackDuration={0} /> : null;
+}
+
 function Player({ source, seed, fallbackDuration }: { source: AudioSource; seed: string; fallbackDuration: number }) {
   const player = useAudioPlayer(source, { updateInterval: 200 });
   const status = useAudioPlayerStatus(player);
