@@ -55,6 +55,7 @@ export const ru = {
     title: 'Говорите!',
     stop: 'Закончить',
     minDuration: 'Говорите хотя бы 15 секунд',
+    discard: 'Отменить без отправки',
     uploading: 'Отправляем запись…',
     uploadFailed: 'Не удалось отправить запись',
     silentTitle: 'Мы вас не услышали',
