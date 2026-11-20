@@ -56,6 +56,7 @@ export type AttemptDetail = {
   failureReason: string | null;
   evaluation: Evaluation | null;
   metrics: Metrics | null;
+  reviewText: string | null;
   hasReviewAudio: boolean;
 };
 

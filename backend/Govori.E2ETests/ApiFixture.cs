@@ -143,12 +143,15 @@ public sealed class FakeEvaluator : ISpeechEvaluator
 public sealed class FakeReviewWriter : IReviewWriter
 {
     private int _failuresLeft;
+    private int _timeoutsLeft;
     private int _count;
 
     public void FailNext(int times) => _failuresLeft = times;
+    public void TimeoutNext(int times) => _timeoutsLeft = times;
 
     public Task<string> WriteAsync(ReviewContext context, CancellationToken ct)
     {
+        if (Interlocked.Decrement(ref _timeoutsLeft) >= 0) throw new TaskCanceledException("Claude timed out (simulated)");
         if (Interlocked.Decrement(ref _failuresLeft) >= 0) throw new HttpRequestException("Claude is down (simulated)");
         var n = Interlocked.Increment(ref _count);
         var prev = context.Previous?.Score.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none";
@@ -161,12 +164,36 @@ public sealed class FakeReviewWriter : IReviewWriter
 public sealed class FakeSynthesizer : ISpeechSynthesizer
 {
     private int _failuresLeft;
+    private int _timeoutsLeft;
+    private SynthesisGate? _nextGate;
 
     public void FailNext(int times) => _failuresLeft = times;
-
-    public Task<byte[]> SynthesizeAsync(string text, CancellationToken ct)
+    public void TimeoutNext(int times) => _timeoutsLeft = times;
+    public SynthesisGate BlockNext()
     {
-        if (Interlocked.Decrement(ref _failuresLeft) >= 0) throw new HttpRequestException("TTS is down (simulated)");
-        return Task.FromResult(System.Text.Encoding.UTF8.GetBytes(text));
+        var gate = new SynthesisGate();
+        if (Interlocked.CompareExchange(ref _nextGate, gate, null) is not null)
+            throw new InvalidOperationException("A synthesis is already blocked");
+        return gate;
     }
+
+    public async Task<byte[]> SynthesizeAsync(string text, CancellationToken ct)
+    {
+        var gate = Interlocked.Exchange(ref _nextGate, null);
+        if (gate is not null)
+        {
+            gate.Started.TrySetResult(true);
+            await gate.Continue.Task.WaitAsync(ct);
+        }
+        if (Interlocked.Decrement(ref _timeoutsLeft) >= 0) throw new TaskCanceledException("OpenAI timed out (simulated)");
+        if (Interlocked.Decrement(ref _failuresLeft) >= 0) throw new HttpRequestException("TTS is down (simulated)");
+        return System.Text.Encoding.UTF8.GetBytes(text);
+    }
+}
+
+public sealed class SynthesisGate
+{
+    public TaskCompletionSource<bool> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource<bool> Continue { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public void Release() => Continue.TrySetResult(true);
 }

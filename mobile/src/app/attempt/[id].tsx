@@ -125,7 +125,7 @@ export default function AttemptScreen() {
         </View>
       )}
 
-      {ev && <ReviewCard attemptId={data.id} evaluation={ev} hasAudio={data.hasReviewAudio} />}
+      {ev && <ReviewCard attemptId={data.id} evaluation={ev} reviewText={data.reviewText} hasAudio={data.hasReviewAudio} />}
 
       {!!data.transcript && (
         <Card style={{ gap: spacing(1.5) }}>
@@ -157,7 +157,17 @@ function SubScoreBars({ scores }: { scores: SubScores }) {
 }
 
 /** The AI coach's spoken review, with the written version behind a toggle. */
-function ReviewCard({ attemptId, evaluation, hasAudio }: { attemptId: string; evaluation: Evaluation; hasAudio: boolean }) {
+function ReviewCard({
+  attemptId,
+  evaluation,
+  reviewText,
+  hasAudio,
+}: {
+  attemptId: string;
+  evaluation: Evaluation;
+  reviewText: string | null;
+  hasAudio: boolean;
+}) {
   // Without a voice-over (older attempts, TTS unavailable) the text is the only review, so show it right away.
   const [open, setOpen] = useState(!hasAudio);
   return (
@@ -173,11 +183,15 @@ function ReviewCard({ attemptId, evaluation, hasAudio }: { attemptId: string; ev
         </Pressable>
       )}
       {open && (
-        <View style={{ gap: spacing(2.5) }}>
-          <ReviewList title={t.result.strengths} items={evaluation.strengths} mark="+" />
-          <ReviewList title={t.result.improvements} items={evaluation.improvements} mark="–" />
-          <ReviewList title={t.result.suggestions} items={evaluation.suggestions} mark="→" />
-        </View>
+        reviewText !== null ? (
+          <Text style={type.body}>{reviewText}</Text>
+        ) : (
+          <View style={{ gap: spacing(2.5) }}>
+            <ReviewList title={t.result.strengths} items={evaluation.strengths} mark="+" />
+            <ReviewList title={t.result.improvements} items={evaluation.improvements} mark="–" />
+            <ReviewList title={t.result.suggestions} items={evaluation.suggestions} mark="→" />
+          </View>
+        )
       )}
     </Card>
   );

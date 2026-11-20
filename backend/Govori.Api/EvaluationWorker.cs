@@ -12,6 +12,7 @@ namespace Govori.Api;
 public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWorker> log) : BackgroundService
 {
     private static readonly SemaphoreSlim Signal = new(0);
+    internal static readonly SemaphoreSlim ProcessingLock = new(1, 1);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public static void Wake() => Signal.Release();
@@ -49,10 +50,24 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
 
     private async Task ProcessAsync(Guid attemptId, CancellationToken ct)
     {
+        await ProcessingLock.WaitAsync(ct);
+        try
+        {
+            await ProcessLockedAsync(attemptId, ct);
+        }
+        finally
+        {
+            ProcessingLock.Release();
+        }
+    }
+
+    private async Task ProcessLockedAsync(Guid attemptId, CancellationToken ct)
+    {
         using var scope = scopes.CreateScope();
         var sp = scope.ServiceProvider;
         var db = sp.GetRequiredService<GovoriDbContext>();
         var attempt = await db.Attempts.Include(a => a.Topic).Include(a => a.Evaluation).FirstAsync(a => a.Id == attemptId, ct);
+        string? uploadedReviewKey = null;
 
         try
         {
@@ -86,27 +101,45 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
             else
                 (attempt.Evaluation.Score, attempt.Evaluation.Json) = (result.Score, json);
 
-            await VoiceReviewAsync(sp, db, attempt, result, metrics, ct);
+            uploadedReviewKey = await VoiceReviewAsync(sp, db, attempt, result, metrics, ct);
             attempt.Status = AttemptStatus.Done;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             log.LogError(ex, "Evaluation failed for attempt {AttemptId}", attempt.Id);
             attempt.Status = AttemptStatus.Failed;
             attempt.FailureReason = await sp.GetRequiredService<IContentProvider>().GetAsync(SettingKeys.EvaluationFailed, ct);
         }
 
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            if (uploadedReviewKey is not null)
+            {
+                try
+                {
+                    await sp.GetRequiredService<IAudioStorage>().DeleteAsync(uploadedReviewKey, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    log.LogError(ex, "Failed to clean up review audio for attempt {AttemptId}", attempt.Id);
+                }
+            }
+            throw;
+        }
     }
 
     /// <summary>
     /// Writes an informal spoken review (aware of the previous result and recent reviews) and voices it.
     /// Optional: without a synthesizer or on failure the text review is still shown.
     /// </summary>
-    private async Task VoiceReviewAsync(
+    private async Task<string?> VoiceReviewAsync(
         IServiceProvider sp, GovoriDbContext db, Attempt attempt, EvaluationResult result, SpeechMetrics metrics, CancellationToken ct)
     {
-        if (sp.GetService<ISpeechSynthesizer>() is not { } synthesizer) return;
+        if (sp.GetService<ISpeechSynthesizer>() is not { } synthesizer) return null;
         try
         {
             var earlier = db.Attempts.Where(a => a.UserId == attempt.UserId && a.Id != attempt.Id && a.CreatedAt < attempt.CreatedAt);
@@ -122,21 +155,24 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
             {
                 text = await sp.GetRequiredService<IReviewWriter>().WriteAsync(context, ct);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 log.LogWarning(ex, "Review writing failed for attempt {AttemptId}; using template", attempt.Id);
                 text = ReviewScript.Build(result, previous);
             }
 
+            attempt.ReviewText = text;
             var mp3 = await synthesizer.SynthesizeAsync(text, ct);
             var key = $"{attempt.UserId}/{attempt.Id}.review.mp3";
             using var stream = new MemoryStream(mp3);
             await sp.GetRequiredService<IAudioStorage>().SaveAsync(key, stream, ct);
-            (attempt.ReviewText, attempt.ReviewAudioKey) = (text, key);
+            attempt.ReviewAudioKey = key;
+            return key;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             log.LogWarning(ex, "Review voice-over failed for attempt {AttemptId}", attempt.Id);
+            return null;
         }
     }
 }
