@@ -56,6 +56,7 @@ export type AttemptDetail = {
   failureReason: string | null;
   evaluation: Evaluation | null;
   metrics: Metrics | null;
+  hasReviewAudio: boolean;
 };
 
 export type Me = { attempts: number; averageScore: number | null; bestScore: number | null; streakDays: number };
@@ -113,6 +114,10 @@ export const api = {
   deleteAttempt: (id: string) => request<void>(`/attempts/${id}`, { method: 'DELETE' }),
   audioSource: async (id: string) => ({
     uri: `${API_URL}/attempts/${id}/audio`,
+    headers: { Authorization: `Bearer ${await getToken()}` },
+  }),
+  reviewAudioSource: async (id: string) => ({
+    uri: `${API_URL}/attempts/${id}/review-audio`,
     headers: { Authorization: `Bearer ${await getToken()}` },
   }),
 

@@ -16,7 +16,7 @@ public class SupabaseAudioStorage(HttpClient http, string projectUrl, string sec
     public async Task SaveAsync(string key, Stream content, CancellationToken ct)
     {
         using var body = new StreamContent(content);
-        body.Headers.ContentType = new MediaTypeHeaderValue("audio/mp4");
+        body.Headers.ContentType = new MediaTypeHeaderValue(key.EndsWith(".mp3", StringComparison.Ordinal) ? "audio/mpeg" : "audio/mp4");
         using var req = Request(HttpMethod.Post, ObjectUrl(key));
         req.Content = body;
         req.Headers.Add("x-upsert", "true");

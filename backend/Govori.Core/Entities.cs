@@ -56,6 +56,12 @@ public class Attempt
     public AttemptStatus Status { get; set; }
     public string? Transcript { get; set; }
     public string? FailureReason { get; set; }
+
+    /// <summary>Storage key of the spoken AI review; null when it was not generated.</summary>
+    public string? ReviewAudioKey { get; set; }
+
+    /// <summary>The text of the spoken review, kept so later reviews can avoid repeating its phrasing.</summary>
+    public string? ReviewText { get; set; }
     public DateTime CreatedAt { get; set; }
     public Evaluation? Evaluation { get; set; }
 }

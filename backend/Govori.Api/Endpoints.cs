@@ -15,7 +15,7 @@ public static class Endpoints
     public record AttemptSummary(Guid Id, string Topic, string Category, AttemptStatus Status, int? Score, int DurationSec, DateTime CreatedAt);
     public record AttemptDetail(
         Guid Id, TopicDto Topic, AttemptStatus Status, int DurationSec, DateTime CreatedAt,
-        string? Transcript, string? FailureReason, EvaluationResult? Evaluation, SpeechMetrics? Metrics);
+        string? Transcript, string? FailureReason, EvaluationResult? Evaluation, SpeechMetrics? Metrics, bool HasReviewAudio);
     public record MeDto(int Attempts, double? AverageScore, int? BestScore, int StreakDays);
 
     public record CategoryDto(string Name, string Description, string? Badge);
@@ -124,13 +124,21 @@ public static class Endpoints
 
             var stored = a.Evaluation is null ? null : JsonSerializer.Deserialize<StoredEvaluation>(a.Evaluation.Json, Json);
             return Results.Ok(new AttemptDetail(a.Id, new TopicDto(a.Topic!.Id, a.Topic.Text, a.Topic.Category!.Name), a.Status,
-                a.DurationSec, a.CreatedAt, a.Transcript, a.FailureReason, stored?.Result, stored?.Metrics));
+                a.DurationSec, a.CreatedAt, a.Transcript, a.FailureReason, stored?.Result, stored?.Metrics, a.ReviewAudioKey != null));
         });
 
         g.MapGet("/{id:guid}/audio", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
             var a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId(), ct);
             return a is null ? Results.NotFound() : Results.Stream(await storage.OpenReadAsync(a.AudioKey, ct), "audio/mp4", enableRangeProcessing: true);
+        });
+
+        g.MapGet("/{id:guid}/review-audio", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
+        {
+            var a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId(), ct);
+            return a?.ReviewAudioKey is null
+                ? Results.NotFound()
+                : Results.Stream(await storage.OpenReadAsync(a.ReviewAudioKey, ct), "audio/mpeg", enableRangeProcessing: true);
         });
 
         g.MapPost("/{id:guid}/retry", async (Guid id, ClaimsPrincipal user, GovoriDbContext db) =>
@@ -152,6 +160,7 @@ public static class Endpoints
             if (a is null) return Results.NotFound();
 
             await storage.DeleteAsync(a.AudioKey, ct);
+            if (a.ReviewAudioKey is not null) await storage.DeleteAsync(a.ReviewAudioKey, ct);
             db.Attempts.Remove(a);
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
@@ -182,7 +191,11 @@ public static class Endpoints
         {
             var userId = user.UserId();
             var attempts = await db.Attempts.Include(a => a.Evaluation).Where(a => a.UserId == userId).ToListAsync(ct);
-            foreach (var a in attempts) await storage.DeleteAsync(a.AudioKey, ct);
+            foreach (var a in attempts)
+            {
+                await storage.DeleteAsync(a.AudioKey, ct);
+                if (a.ReviewAudioKey is not null) await storage.DeleteAsync(a.ReviewAudioKey, ct);
+            }
             db.Attempts.RemoveRange(attempts);
             await db.Users.Where(u => u.Id == userId).ExecuteDeleteAsync(ct);
             await db.SaveChangesAsync(ct);

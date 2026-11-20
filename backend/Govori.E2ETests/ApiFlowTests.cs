@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 
 namespace Govori.E2ETests;
@@ -85,8 +86,17 @@ public class ApiFlowTests(ApiFixture api)
         var audio = await http.GetByteArrayAsync($"/attempts/{id}/audio");
         Assert.Equal(FakeAudio, audio);
 
-        // Delete.
+        // The spoken AI review is available as MP3.
+        Assert.True(detail.GetProperty("hasReviewAudio").GetBoolean());
+        var review = await http.GetAsync($"/attempts/{id}/review-audio");
+        Assert.Equal(HttpStatusCode.OK, review.StatusCode);
+        Assert.Equal("audio/mpeg", review.Content.Headers.ContentType?.MediaType);
+        Assert.StartsWith("review#", Encoding.UTF8.GetString(await review.Content.ReadAsByteArrayAsync()), StringComparison.Ordinal);
+        Assert.Single(ReviewFiles(id));
+
+        // Delete removes the recording and the review audio.
         Assert.Equal(HttpStatusCode.NoContent, (await http.DeleteAsync($"/attempts/{id}")).StatusCode);
+        Assert.Empty(ReviewFiles(id));
         Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"/attempts/{id}")).StatusCode);
         Assert.Empty((await http.GetFromJsonAsync<JsonElement>("/attempts")).EnumerateArray());
     }
@@ -112,6 +122,63 @@ public class ApiFlowTests(ApiFixture api)
 
         var me = await http.GetFromJsonAsync<JsonElement>("/me");
         Assert.Equal(6.8, me.GetProperty("averageScore").GetDouble());
+    }
+
+    [Fact]
+    public async Task Spoken_review_knows_the_previous_result_and_recent_reviews()
+    {
+        var http = await api.SignIn();
+        var topicId = await TopicId(http);
+        string first, second;
+        try
+        {
+            api.Evaluator.Score = 5;
+            first = await ReviewText(http, await WaitForStatus(http, await Upload(http, topicId, 60), "Done"));
+            api.Evaluator.Score = 7;
+            second = await ReviewText(http, await WaitForStatus(http, await Upload(http, topicId, 60), "Done"));
+        }
+        finally { api.Evaluator.Score = 8; }
+
+        Assert.Contains("prev=none recent=[]", first, StringComparison.Ordinal);
+        Assert.Contains("prev=5", second, StringComparison.Ordinal);
+        Assert.Contains($"recent=[{first.Split(' ')[0]}]", second, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Spoken_review_falls_back_to_template_when_the_writer_fails()
+    {
+        var http = await api.SignIn();
+        var topicId = await TopicId(http);
+        await WaitForStatus(http, await Upload(http, topicId, 60), "Done"); // score 8
+
+        api.Evaluator.Score = 9;
+        api.ReviewWriter.FailNext(1);
+        try
+        {
+            var text = await ReviewText(http, await WaitForStatus(http, await Upload(http, topicId, 60), "Done"));
+            Assert.StartsWith("Уже лучше, чем в прошлый раз! 9 из 10.", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            api.Evaluator.Score = 8;
+            api.ReviewWriter.FailNext(0);
+        }
+    }
+
+    [Fact]
+    public async Task Attempt_succeeds_without_audio_when_speech_synthesis_fails()
+    {
+        var http = await api.SignIn();
+        api.Synthesizer.FailNext(1);
+        try
+        {
+            var id = await Upload(http, await TopicId(http), 60);
+            var detail = await WaitForStatus(http, id, "Done");
+            Assert.False(detail.GetProperty("hasReviewAudio").GetBoolean());
+            Assert.Equal(8, detail.GetProperty("evaluation").GetProperty("score").GetInt32());
+            Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"/attempts/{id}/review-audio")).StatusCode);
+        }
+        finally { api.Synthesizer.FailNext(0); }
     }
 
     [Fact]
@@ -154,6 +221,9 @@ public class ApiFlowTests(ApiFixture api)
 
         Assert.Equal(HttpStatusCode.NotFound, (await bob.GetAsync($"/attempts/{id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await bob.GetAsync($"/attempts/{id}/audio")).StatusCode);
+        await WaitForStatus(alice, id, "Done");
+        Assert.Equal(HttpStatusCode.NotFound, (await bob.GetAsync($"/attempts/{id}/review-audio")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await alice.GetAsync($"/attempts/{id}/review-audio")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await bob.DeleteAsync($"/attempts/{id}")).StatusCode);
         Assert.Empty((await bob.GetFromJsonAsync<JsonElement>("/attempts")).EnumerateArray());
         Assert.Equal(HttpStatusCode.OK, (await alice.GetAsync($"/attempts/{id}")).StatusCode);
@@ -193,6 +263,7 @@ public class ApiFlowTests(ApiFixture api)
         Assert.Equal(HttpStatusCode.NoContent, (await http.DeleteAsync("/me")).StatusCode);
 
         // Signing in again on the same device starts from scratch.
+        Assert.Empty(ReviewFiles(id));
         var again = await api.SignIn(device);
         Assert.Empty((await again.GetFromJsonAsync<JsonElement>("/attempts")).EnumerateArray());
         Assert.Equal(HttpStatusCode.NotFound, (await again.GetAsync($"/attempts/{id}")).StatusCode);
@@ -208,6 +279,17 @@ public class ApiFlowTests(ApiFixture api)
             { new StringContent(topicId.ToString(CultureInfo.InvariantCulture)), "topicId" },
             { new StringContent(durationSec.ToString(CultureInfo.InvariantCulture)), "durationSec" },
         };
+    }
+
+    private string[] ReviewFiles(Guid id) => Directory.Exists(api.StoragePath)
+        ? Directory.GetFiles(api.StoragePath, $"{id}.review.mp3", SearchOption.AllDirectories)
+        : [];
+
+    private static async Task<string> ReviewText(HttpClient http, JsonElement detail)
+    {
+        Assert.True(detail.GetProperty("hasReviewAudio").GetBoolean());
+        var id = detail.GetProperty("id").GetGuid();
+        return Encoding.UTF8.GetString(await http.GetByteArrayAsync($"/attempts/{id}/review-audio"));
     }
 
     private static async Task<int> TopicId(HttpClient http) =>

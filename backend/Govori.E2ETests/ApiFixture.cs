@@ -25,6 +25,9 @@ public sealed class ApiFixture : IAsyncLifetime
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
     public FakeEvaluator Evaluator { get; } = new();
     public FakeTranscriber Transcriber { get; } = new();
+    public FakeReviewWriter ReviewWriter { get; } = new();
+    public FakeSynthesizer Synthesizer { get; } = new();
+    public string StoragePath => _storage;
 
     public async Task InitializeAsync()
     {
@@ -46,6 +49,8 @@ public sealed class ApiFixture : IAsyncLifetime
             {
                 s.AddSingleton<ITranscriber>(Transcriber);
                 s.AddSingleton<ISpeechEvaluator>(Evaluator);
+                s.AddSingleton<IReviewWriter>(ReviewWriter);
+                s.AddSingleton<ISpeechSynthesizer>(Synthesizer);
             });
         });
         _ = _factory.Server; // start host: runs migrations and seeding
@@ -131,5 +136,37 @@ public sealed class FakeEvaluator : ISpeechEvaluator
         if (Interlocked.Decrement(ref _failuresLeft) >= 0) throw new HttpRequestException("AI provider is down (simulated)");
         return Task.FromResult(new EvaluationResult(Score, new SubScores(8, 9, 7, 8, 8), "Хорошее выступление.",
             ["Чёткий старт"], ["Меньше «ну»"], ["Начинайте с главной мысли"]));
+    }
+}
+
+/// <summary>Writes "review#N prev=S recent=[ids]" so tests can see what context the writer was given.</summary>
+public sealed class FakeReviewWriter : IReviewWriter
+{
+    private int _failuresLeft;
+    private int _count;
+
+    public void FailNext(int times) => _failuresLeft = times;
+
+    public Task<string> WriteAsync(ReviewContext context, CancellationToken ct)
+    {
+        if (Interlocked.Decrement(ref _failuresLeft) >= 0) throw new HttpRequestException("Claude is down (simulated)");
+        var n = Interlocked.Increment(ref _count);
+        var prev = context.Previous?.Score.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none";
+        var recent = string.Join(",", context.RecentReviews.Select(r => r.Split(' ')[0]));
+        return Task.FromResult($"review#{n} prev={prev} recent=[{recent}]");
+    }
+}
+
+/// <summary>"Synthesizes" speech by returning the UTF-8 text, so tests can read back what was voiced.</summary>
+public sealed class FakeSynthesizer : ISpeechSynthesizer
+{
+    private int _failuresLeft;
+
+    public void FailNext(int times) => _failuresLeft = times;
+
+    public Task<byte[]> SynthesizeAsync(string text, CancellationToken ct)
+    {
+        if (Interlocked.Decrement(ref _failuresLeft) >= 0) throw new HttpRequestException("TTS is down (simulated)");
+        return Task.FromResult(System.Text.Encoding.UTF8.GetBytes(text));
     }
 }
