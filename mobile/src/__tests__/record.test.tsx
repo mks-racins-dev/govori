@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-
 
 import { t } from '@/i18n/ru';
 
-import RecordScreen from '../record';
+import RecordScreen from '../app/record';
 
 const mockRecorder = {
   prepareToRecordAsync: jest.fn(() => Promise.resolve()),
@@ -65,7 +65,7 @@ const { api } = jest.requireMock('@/lib/api');
 const { router } = jest.requireMock('expo-router');
 
 async function renderRecording() {
-  const view = render(<RecordScreen />);
+  const view = await render(<RecordScreen />);
   await waitFor(() => expect(mockRecorder.record).toHaveBeenCalled());
   return view;
 }
@@ -84,7 +84,7 @@ it('discarding stops the recorder, goes home and never uploads', async () => {
   await renderRecording();
 
   await act(async () => {
-    fireEvent.press(screen.getByText(t.record.discard));
+    await fireEvent.press(screen.getByText(t.record.discard));
   });
 
   expect(mockRecorder.stop).toHaveBeenCalled();
@@ -97,7 +97,7 @@ it('discarding works before the 15-second minimum', async () => {
   await renderRecording();
 
   await act(async () => {
-    fireEvent.press(screen.getByText(t.record.discard));
+    await fireEvent.press(screen.getByText(t.record.discard));
   });
 
   expect(router.replace).toHaveBeenCalledWith('/');
@@ -108,14 +108,42 @@ it('hitting the time limit after discarding does not upload', async () => {
   const view = await renderRecording();
 
   await act(async () => {
-    fireEvent.press(screen.getByText(t.record.discard));
+    await fireEvent.press(screen.getByText(t.record.discard));
   });
   mockRecorderState.durationMillis = 61_000;
   await act(async () => {
-    view.rerender(<RecordScreen />);
+    await view.rerender(<RecordScreen />);
   });
 
   expect(api.uploadAttempt).not.toHaveBeenCalled();
+});
+
+it('disables discard while finishing at the time limit', async () => {
+  mockRecorderState.durationMillis = 59_900;
+  const view = await renderRecording();
+  let resolveStop!: () => void;
+  mockRecorder.stop.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        resolveStop = resolve;
+      }),
+  );
+  mockRecorderState.durationMillis = 60_000;
+  await act(async () => {
+    await view.rerender(<RecordScreen />);
+  });
+
+  expect(screen.getByRole('button', { name: t.record.discard }).props.accessibilityState?.disabled).toBe(true);
+
+  await act(async () => {
+    await fireEvent.press(screen.getByText(t.record.discard));
+  });
+  expect(api.uploadAttempt).not.toHaveBeenCalled();
+
+  await act(async () => {
+    resolveStop();
+  });
+  await waitFor(() => expect(api.uploadAttempt).toHaveBeenCalledWith(7, 60, 'file:///speech.m4a'));
 });
 
 it('finishing normally still uploads (control case)', async () => {
@@ -124,11 +152,11 @@ it('finishing normally still uploads (control case)', async () => {
   // Accumulate voiced time so the silence check passes.
   mockRecorderState.durationMillis = 30_000;
   await act(async () => {
-    view.rerender(<RecordScreen />);
+    await view.rerender(<RecordScreen />);
   });
 
   await act(async () => {
-    fireEvent.press(screen.getByText(t.record.stop));
+    await fireEvent.press(screen.getByText(t.record.stop));
   });
 
   await waitFor(() => expect(api.uploadAttempt).toHaveBeenCalledWith(7, 30, 'file:///speech.m4a'));

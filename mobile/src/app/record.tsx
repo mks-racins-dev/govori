@@ -27,7 +27,7 @@ const VOICE_DB = -38;
 // Less voiced time than this means the user stayed silent: don't upload.
 const MIN_VOICED_SEC = 3;
 
-type Phase = 'starting' | 'recording' | 'uploading' | 'uploadFailed' | 'silent';
+type Phase = 'starting' | 'recording' | 'stopping' | 'uploading' | 'uploadFailed' | 'silent';
 
 export default function RecordScreen() {
   const { topicId, topicText } = useLocalSearchParams<{ topicId: string; topicText: string }>();
@@ -83,6 +83,7 @@ export default function RecordScreen() {
   async function finish() {
     if (stopping.current) return;
     stopping.current = true;
+    setPhase('stopping');
     const durationSec = Math.min(LIMIT_SEC, Math.round(elapsedSec));
     await recorder.stop();
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
