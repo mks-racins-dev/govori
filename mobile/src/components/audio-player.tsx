@@ -26,47 +26,22 @@ export function AttemptPlayer({ attemptId, fallbackDuration }: { attemptId: stri
 export function ReviewPlayer({ attemptId }: { attemptId: string }) {
   const [source, setSource] = useState<AudioSource | null>(null);
   const [requested, setRequested] = useState(false);
-  const [error, setError] = useState(false);
   const seed = `review-${attemptId}`;
 
   const request = () => {
     setRequested(true);
-    setError(false);
-    api.reviewAudioSource(attemptId).then(setSource).catch(() => {
-      setRequested(false);
-      setError(true);
-    });
+    api.reviewAudioSource(attemptId).then(setSource);
   };
 
   return source ? (
-    <Player
-      source={source}
-      seed={seed}
-      fallbackDuration={0}
-      autoPlay
-      onError={() => {
-        setSource(null);
-        setRequested(false);
-        setError(true);
-      }}
-    />
+    <Player source={source} seed={seed} fallbackDuration={0} autoPlay />
   ) : (
-    <IdlePlayer seed={seed} onPlay={request} loading={requested} error={error} />
+    <IdlePlayer seed={seed} onPlay={request} loading={requested} />
   );
 }
 
 /** Looks like the player before any audio is loaded. */
-function IdlePlayer({
-  seed,
-  onPlay,
-  loading,
-  error,
-}: {
-  seed: string;
-  onPlay: () => void;
-  loading: boolean;
-  error?: boolean;
-}) {
+function IdlePlayer({ seed, onPlay, loading }: { seed: string; onPlay: () => void; loading: boolean }) {
   const levels = useMemo(() => placeholderLevels(seed, 34), [seed]);
   return (
     <View style={styles.row}>
@@ -77,7 +52,7 @@ function IdlePlayer({
         <Waveform levels={levels} progress={0} height={36} barWidth={2.5} gap={2.5} />
         <View style={styles.times}>
           <Text style={type.label}>{formatClock(0)}</Text>
-          <Text style={type.label}>{error ? 'Try again' : formatClock(0)}</Text>
+          <Text style={type.label}>{formatClock(0)}</Text>
         </View>
       </View>
     </View>
@@ -89,22 +64,16 @@ function Player({
   seed,
   fallbackDuration,
   autoPlay = false,
-  onError,
 }: {
   source: AudioSource;
   seed: string;
   fallbackDuration: number;
   autoPlay?: boolean;
-  onError?: () => void;
 }) {
   const player = useAudioPlayer(source, { updateInterval: 200 });
   const status = useAudioPlayerStatus(player);
   const levels = useMemo(() => placeholderLevels(seed, 34), [seed]);
   const autoPlayed = useRef(false);
-
-  useEffect(() => {
-    if (status.error) onError?.();
-  }, [status.error, onError]);
 
   // The user already pressed play once; start as soon as the audio is ready.
   useEffect(() => {
