@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Claims;
 using System.Text.Json;
 using Govori.Core;
@@ -11,10 +10,6 @@ public static class Endpoints
 {
     private const int DailyAttemptLimit = 20;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> ReviewLocks = new();
-
-    private static SemaphoreSlim ReviewLock(Guid attemptId) =>
-        ReviewLocks.GetOrAdd(attemptId, _ => new SemaphoreSlim(1, 1));
 
     public record TopicDto(int Id, string Text, string Category);
     public record AttemptSummary(Guid Id, string Topic, string Category, AttemptStatus Status, int? Score, int DurationSec, DateTime CreatedAt);
@@ -145,18 +140,17 @@ public static class Endpoints
             IServiceProvider services, ILogger<EvaluationWorker> log, CancellationToken ct) =>
         {
             var userId = user.UserId();
-            var reviewLock = ReviewLock(id);
-            await reviewLock.WaitAsync(ct);
+            var a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
+            if (a is null) return Results.NotFound();
+            if (a.ReviewAudioKey is not null)
+                return Results.Stream(await storage.OpenReadAsync(a.ReviewAudioKey, ct), "audio/mpeg", enableRangeProcessing: true);
+            if (a.ReviewText is null || services.GetService<ISpeechSynthesizer>() is not { } synthesizer) return Results.NotFound();
+
+            // Voiced on first play only, to avoid paying for reviews nobody listens to. The lock keeps two
+            // requests from voicing it twice and a deletion from leaving the new file behind.
+            await EvaluationWorker.ProcessingLock.WaitAsync(ct);
             try
             {
-                var a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
-                if (a is null) return Results.NotFound();
-                if (a.ReviewAudioKey is not null)
-                    return Results.Stream(await storage.OpenReadAsync(a.ReviewAudioKey, ct), "audio/mpeg", enableRangeProcessing: true);
-                if (a.ReviewText is null || services.GetService<ISpeechSynthesizer>() is not { } synthesizer) return Results.NotFound();
-
-                // Voiced on first play only, to avoid paying for reviews nobody listens to. The lock keeps two
-                // requests from voicing it twice and a deletion from leaving the new file behind.
                 db.ChangeTracker.Clear();
                 a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
                 if (a?.ReviewText is null) return Results.NotFound();
@@ -177,27 +171,12 @@ public static class Endpoints
                 var key = $"{a.UserId}/{a.Id}.review.mp3";
                 using (var stream = new MemoryStream(mp3)) await storage.SaveAsync(key, stream, ct);
                 a.ReviewAudioKey = key;
-                try
-                {
-                    await db.SaveChangesAsync(ct);
-                }
-                catch
-                {
-                    try
-                    {
-                        await storage.DeleteAsync(key, CancellationToken.None);
-                    }
-                    catch (Exception cleanupEx)
-                    {
-                        log.LogError(cleanupEx, "Review voice-over cleanup failed for attempt {AttemptId}", a.Id);
-                    }
-                    throw;
-                }
+                await db.SaveChangesAsync(ct);
                 return Results.File(mp3, "audio/mpeg", enableRangeProcessing: true);
             }
             finally
             {
-                reviewLock.Release();
+                EvaluationWorker.ProcessingLock.Release();
             }
         });
 
@@ -217,12 +196,8 @@ public static class Endpoints
         g.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
             await EvaluationWorker.ProcessingLock.WaitAsync(ct);
-            var reviewLock = ReviewLock(id);
-            var reviewLockHeld = false;
             try
             {
-                await reviewLock.WaitAsync(ct);
-                reviewLockHeld = true;
                 var a = await db.Attempts.Include(x => x.Evaluation).FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId(), ct);
                 if (a is null) return Results.NotFound();
 
@@ -234,7 +209,6 @@ public static class Endpoints
             }
             finally
             {
-                if (reviewLockHeld) reviewLock.Release();
                 EvaluationWorker.ProcessingLock.Release();
             }
         });
@@ -269,21 +243,8 @@ public static class Endpoints
                 var attempts = await db.Attempts.Include(a => a.Evaluation).Where(a => a.UserId == userId).ToListAsync(ct);
                 foreach (var a in attempts)
                 {
-                    var reviewLock = ReviewLock(a.Id);
-                    await reviewLock.WaitAsync(ct);
-                    try
-                    {
-                        await storage.DeleteAsync(a.AudioKey, ct);
-                        // Re-read under the lock: a voice-over that finished while we waited has saved a key
-                        // the list loaded above doesn't have yet.
-                        var reviewKey = await db.Attempts.Where(x => x.Id == a.Id)
-                            .Select(x => x.ReviewAudioKey).FirstOrDefaultAsync(ct);
-                        if (reviewKey is not null) await storage.DeleteAsync(reviewKey, ct);
-                    }
-                    finally
-                    {
-                        reviewLock.Release();
-                    }
+                    await storage.DeleteAsync(a.AudioKey, ct);
+                    if (a.ReviewAudioKey is not null) await storage.DeleteAsync(a.ReviewAudioKey, ct);
                 }
                 db.Attempts.RemoveRange(attempts);
                 await db.Users.Where(u => u.Id == userId).ExecuteDeleteAsync(ct);
