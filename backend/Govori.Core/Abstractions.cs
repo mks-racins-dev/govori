@@ -15,27 +15,25 @@ public interface ITranscriber
     Task<string> TranscribeAsync(Stream audio, string fileName, CancellationToken ct);
 }
 
+/// <summary>Scores an attempt and writes the coach's spoken review in a single AI call.</summary>
 public interface ISpeechEvaluator
 {
-    Task<EvaluationResult> EvaluateAsync(string topic, string transcript, SpeechMetrics metrics, CancellationToken ct);
+    Task<Evaluated> EvaluateAsync(EvaluationRequest request, CancellationToken ct);
 }
+
+/// <param name="Previous">The user's previous evaluated attempt, if any.</param>
+/// <param name="RecentReviews">Recently spoken reviews, newest first, so the new one can avoid repeating them.</param>
+public record EvaluationRequest(
+    string Topic, string Transcript, SpeechMetrics Metrics, EvaluationResult? Previous, IReadOnlyList<string> RecentReviews);
+
+/// <param name="Review">Text for the voice-over; null when the provider gave none (the template is used then).</param>
+public record Evaluated(EvaluationResult Result, string? Review);
 
 /// <summary>Turns text into speech (MP3). Used for the spoken AI review.</summary>
 public interface ISpeechSynthesizer
 {
     Task<byte[]> SynthesizeAsync(string text, CancellationToken ct);
 }
-
-/// <summary>Writes the informal text the AI coach speaks about an attempt.</summary>
-public interface IReviewWriter
-{
-    Task<string> WriteAsync(ReviewContext context, CancellationToken ct);
-}
-
-/// <param name="Previous">The user's previous evaluated attempt, if any.</param>
-/// <param name="RecentReviews">Recently spoken reviews, newest first, so the new one can avoid repeating them.</param>
-public record ReviewContext(
-    string Topic, EvaluationResult Current, SpeechMetrics Metrics, EvaluationResult? Previous, IReadOnlyList<string> RecentReviews);
 
 /// <summary>Reads server-side texts (prompts, word lists) from the database.</summary>
 public interface IContentProvider

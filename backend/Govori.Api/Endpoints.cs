@@ -117,7 +117,7 @@ public static class Endpoints
                 .ToListAsync();
         });
 
-        g.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal user, GovoriDbContext db) =>
+        g.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IServiceProvider services) =>
         {
             var a = await db.Attempts.Include(x => x.Topic).ThenInclude(t => t!.Category).Include(x => x.Evaluation)
                 .FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId());
@@ -126,7 +126,8 @@ public static class Endpoints
             var stored = a.Evaluation is null ? null : JsonSerializer.Deserialize<StoredEvaluation>(a.Evaluation.Json, Json);
             return Results.Ok(new AttemptDetail(a.Id, new TopicDto(a.Topic!.Id, a.Topic.Text, a.Topic.Category!.Name), a.Status,
                 a.DurationSec, a.CreatedAt, a.Transcript, a.FailureReason, stored?.Result, stored?.Metrics,
-                a.ReviewText, a.ReviewAudioKey != null));
+                // Audio is voiced on first play, so it is "available" whenever there is text to voice.
+                a.ReviewText, a.ReviewAudioKey != null || (a.ReviewText != null && services.GetService<ISpeechSynthesizer>() != null)));
         });
 
         g.MapGet("/{id:guid}/audio", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
@@ -135,12 +136,48 @@ public static class Endpoints
             return a is null ? Results.NotFound() : Results.Stream(await storage.OpenReadAsync(a.AudioKey, ct), "audio/mp4", enableRangeProcessing: true);
         });
 
-        g.MapGet("/{id:guid}/review-audio", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
+        g.MapGet("/{id:guid}/review-audio", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage,
+            IServiceProvider services, ILogger<EvaluationWorker> log, CancellationToken ct) =>
         {
-            var a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId(), ct);
-            return a?.ReviewAudioKey is null
-                ? Results.NotFound()
-                : Results.Stream(await storage.OpenReadAsync(a.ReviewAudioKey, ct), "audio/mpeg", enableRangeProcessing: true);
+            var userId = user.UserId();
+            var a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
+            if (a is null) return Results.NotFound();
+            if (a.ReviewAudioKey is not null)
+                return Results.Stream(await storage.OpenReadAsync(a.ReviewAudioKey, ct), "audio/mpeg", enableRangeProcessing: true);
+            if (a.ReviewText is null || services.GetService<ISpeechSynthesizer>() is not { } synthesizer) return Results.NotFound();
+
+            // Voiced on first play only, to avoid paying for reviews nobody listens to. The lock keeps two
+            // requests from voicing it twice and a deletion from leaving the new file behind.
+            await EvaluationWorker.ProcessingLock.WaitAsync(ct);
+            try
+            {
+                db.ChangeTracker.Clear();
+                a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
+                if (a?.ReviewText is null) return Results.NotFound();
+                if (a.ReviewAudioKey is not null)
+                    return Results.Stream(await storage.OpenReadAsync(a.ReviewAudioKey, ct), "audio/mpeg", enableRangeProcessing: true);
+
+                byte[] mp3;
+                try
+                {
+                    mp3 = await synthesizer.SynthesizeAsync(a.ReviewText, ct);
+                }
+                catch (Exception ex) when (!ct.IsCancellationRequested)
+                {
+                    log.LogWarning(ex, "Review voice-over failed for attempt {AttemptId}", a.Id);
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
+
+                var key = $"{a.UserId}/{a.Id}.review.mp3";
+                using (var stream = new MemoryStream(mp3)) await storage.SaveAsync(key, stream, ct);
+                a.ReviewAudioKey = key;
+                await db.SaveChangesAsync(ct);
+                return Results.File(mp3, "audio/mpeg", enableRangeProcessing: true);
+            }
+            finally
+            {
+                EvaluationWorker.ProcessingLock.Release();
+            }
         });
 
         g.MapPost("/{id:guid}/retry", async (Guid id, ClaimsPrincipal user, GovoriDbContext db) =>

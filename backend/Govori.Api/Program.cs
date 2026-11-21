@@ -36,9 +36,10 @@ if (string.IsNullOrWhiteSpace(openAiKey))
 else
     builder.Services.AddHttpClient<ITranscriber, OpenAiTranscriber>((http, sp) =>
         new OpenAiTranscriber(http, sp.GetRequiredService<IContentProvider>(), openAiKey,
-            config["OpenAI:TranscribeModel"] ?? "gpt-4o-transcribe"));
+            config["OpenAI:TranscribeModel"] ?? "gpt-4o-mini-transcribe"));
 
 // The spoken review needs OpenAI too; without a key the app shows the text review only.
+// It is voiced on demand, when the user first presses play.
 if (!string.IsNullOrWhiteSpace(openAiKey))
     builder.Services.AddHttpClient<ISpeechSynthesizer, OpenAiSpeechSynthesizer>((http, sp) =>
         new OpenAiSpeechSynthesizer(http, sp.GetRequiredService<IContentProvider>(), openAiKey,
@@ -52,12 +53,6 @@ else
         new ClaudeEvaluator(http, sp.GetRequiredService<IContentProvider>(), anthropicKey,
             config["Anthropic:Model"] ?? "claude-haiku-5-5"));
 
-if (string.IsNullOrWhiteSpace(anthropicKey))
-    builder.Services.AddSingleton<IReviewWriter, TemplateReviewWriter>();
-else
-    builder.Services.AddHttpClient<IReviewWriter, ClaudeReviewWriter>((http, sp) =>
-        new ClaudeReviewWriter(http, sp.GetRequiredService<IContentProvider>(), anthropicKey,
-            config["Anthropic:ReviewModel"] ?? config["Anthropic:Model"] ?? "claude-haiku-5-5"));
 
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<IContentProvider, DbContentProvider>();

@@ -72,19 +72,36 @@ public class ClaudeEvaluatorTests
                 new System.Text.Json.Nodes.JsonObject { ["type"] = "text", ["text"] = json }),
         }.ToJsonString();
 
-        var r = ClaudeEvaluator.ParseResponse(response);
+        var (r, review) = ClaudeEvaluator.ParseResponse(response);
 
         Assert.Equal(10, r.Score);
         Assert.Equal(1, r.SubScores.Structure);
         Assert.Equal("Хорошо", r.Summary);
+        Assert.Null(review);
     }
 
     [Fact]
-    public void Throws_on_refusal()
+    public void Parses_and_trims_the_review()
     {
-        Assert.Throws<InvalidOperationException>(() =>
-            ClaudeEvaluator.ParseResponse("""{"stop_reason":"refusal","content":[]}"""));
+        const string json = """
+            {"score":7,"subScores":{"structure":7,"relevance":7,"vocabulary":7,"fluency":7,"pace":7},
+             "summary":"s","strengths":[],"improvements":[],"suggestions":[],"review":"  Привет! Неплохо, 7 из 10. "}
+            """;
+        var response = new System.Text.Json.Nodes.JsonObject
+        {
+            ["stop_reason"] = "end_turn",
+            ["content"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["type"] = "text", ["text"] = json }),
+        }.ToJsonString();
+
+        Assert.Equal("Привет! Неплохо, 7 из 10.", ClaudeEvaluator.ParseResponse(response).Review);
     }
+
+    [Theory]
+    [InlineData("""{"stop_reason":"refusal","content":[]}""")]
+    [InlineData("""{"stop_reason":"max_tokens","content":[{"type":"text","text":"{"}]}""")]
+    [InlineData("""{"stop_reason":"end_turn","content":[]}""")]
+    public void Rejects_unfinished_or_empty_responses(string json) =>
+        Assert.Throws<InvalidOperationException>(() => ClaudeEvaluator.ParseResponse(json));
 }
 
 public class ReviewScriptTests
@@ -105,19 +122,19 @@ public class ReviewScriptTests
     [Fact]
     public void Prompt_message_includes_trend_and_recent_reviews()
     {
-        var msg = ClaudeReviewWriter.BuildMessage(new ReviewContext("Тема", Eval(8), new SpeechMetrics(60, 120, 120, []),
+        var msg = ClaudeEvaluator.BuildMessage(new EvaluationRequest("Тема", "Текст", new SpeechMetrics(60, 120, 120, []),
             Eval(6), ["Привет! Было здорово."]));
 
-        Assert.Contains("Прошлое выступление: 6/10 (стало лучше)", msg, StringComparison.Ordinal);
+        Assert.Contains("Прошлое выступление: 6/10 (неплохо)", msg, StringComparison.Ordinal);
         Assert.Contains("Привет! Было здорово.", msg, StringComparison.Ordinal);
     }
 
     [Fact]
     public void Prompt_message_marks_the_first_attempt()
     {
-        var msg = ClaudeReviewWriter.BuildMessage(new ReviewContext("Тема", Eval(5), new SpeechMetrics(60, 120, 120, []), null, []));
+        var msg = ClaudeEvaluator.BuildMessage(new EvaluationRequest("Тема", "Текст", new SpeechMetrics(60, 120, 120, []), null, []));
         Assert.Contains("это первое", msg, StringComparison.Ordinal);
-        Assert.Contains("5/10 (неплохо)", msg, StringComparison.Ordinal);
+        Assert.Contains("Расшифровка:\nТекст", msg.ReplaceLineEndings("\n"), StringComparison.Ordinal);
         Assert.DoesNotContain("недавние", msg, StringComparison.Ordinal);
     }
 
@@ -132,16 +149,4 @@ public class ReviewScriptTests
     [Fact]
     public void Same_score_is_called_stable() =>
         Assert.StartsWith("Стабильно: снова 6 из 10.", ReviewScript.Build(Eval(6), Eval(6)), StringComparison.Ordinal);
-
-    [Fact]
-    public void Writer_response_text_blocks_are_joined_and_trimmed() =>
-        Assert.Equal("Привет! Неплохо, 6 из 10.", ClaudeReviewWriter.ParseResponse(
-            """{"stop_reason":"end_turn","content":[{"type":"text","text":" Привет! "},{"type":"text","text":"Неплохо, 6 из 10."}]}"""));
-
-    [Theory]
-    [InlineData("""{"stop_reason":"refusal","content":[]}""")]
-    [InlineData("""{"stop_reason":"max_tokens","content":[{"type":"text","text":"Обор"}]}""")]
-    [InlineData("""{"stop_reason":"end_turn","content":[]}""")]
-    public void Writer_rejects_unfinished_or_empty_responses(string json) =>
-        Assert.Throws<InvalidOperationException>(() => ClaudeReviewWriter.ParseResponse(json));
 }

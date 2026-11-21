@@ -86,8 +86,9 @@ public class ApiFlowTests(ApiFixture api)
         var audio = await http.GetByteArrayAsync($"/attempts/{id}/audio");
         Assert.Equal(FakeAudio, audio);
 
-        // The spoken AI review is available as MP3.
+        // The spoken AI review is voiced only when first played, then served from storage.
         Assert.True(detail.GetProperty("hasReviewAudio").GetBoolean());
+        Assert.Empty(ReviewFiles(id));
         var review = await http.GetAsync($"/attempts/{id}/review-audio");
         Assert.Equal(HttpStatusCode.OK, review.StatusCode);
         Assert.Equal("audio/mpeg", review.Content.Headers.ContentType?.MediaType);
@@ -95,6 +96,9 @@ public class ApiFlowTests(ApiFixture api)
         Assert.StartsWith("review#", spokenReview, StringComparison.Ordinal);
         Assert.Equal(spokenReview, detail.GetProperty("reviewText").GetString());
         Assert.Single(ReviewFiles(id));
+        var synthesized = api.Synthesizer.Calls;
+        Assert.Equal(spokenReview, Encoding.UTF8.GetString(await http.GetByteArrayAsync($"/attempts/{id}/review-audio")));
+        Assert.Equal(synthesized, api.Synthesizer.Calls);
 
         // Delete removes the recording and the review audio.
         Assert.Equal(HttpStatusCode.NoContent, (await http.DeleteAsync($"/attempts/{id}")).StatusCode);
@@ -147,14 +151,14 @@ public class ApiFlowTests(ApiFixture api)
     }
 
     [Fact]
-    public async Task Spoken_review_falls_back_to_template_when_the_writer_fails()
+    public async Task Spoken_review_falls_back_to_template_when_the_ai_gives_no_review()
     {
         var http = await api.SignIn();
         var topicId = await TopicId(http);
         await WaitForStatus(http, await Upload(http, topicId, 60), "Done"); // score 8
 
         api.Evaluator.Score = 9;
-        api.ReviewWriter.FailNext(1);
+        api.Evaluator.OmitReviewNext(1);
         try
         {
             var text = await ReviewText(http, await WaitForStatus(http, await Upload(http, topicId, 60), "Done"));
@@ -163,49 +167,34 @@ public class ApiFlowTests(ApiFixture api)
         finally
         {
             api.Evaluator.Score = 8;
-            api.ReviewWriter.FailNext(0);
+            api.Evaluator.OmitReviewNext(0);
         }
-    }
-
-    [Fact]
-    public async Task Attempt_succeeds_without_audio_when_speech_synthesis_fails()
-    {
-        var http = await api.SignIn();
-        api.Synthesizer.FailNext(1);
-        try
-        {
-            var id = await Upload(http, await TopicId(http), 60);
-            var detail = await WaitForStatus(http, id, "Done");
-            Assert.False(detail.GetProperty("hasReviewAudio").GetBoolean());
-            Assert.Equal(8, detail.GetProperty("evaluation").GetProperty("score").GetInt32());
-            Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"/attempts/{id}/review-audio")).StatusCode);
-        }
-        finally { api.Synthesizer.FailNext(0); }
     }
 
     [Theory]
-    [InlineData(true)]
     [InlineData(false)]
-    public async Task Review_provider_timeouts_do_not_fail_the_attempt(bool writerTimeout)
+    [InlineData(true)]
+    public async Task Review_audio_failure_is_temporary_and_can_be_retried(bool timeout)
     {
         var http = await api.SignIn();
-        if (writerTimeout) api.ReviewWriter.TimeoutNext(1);
-        else api.Synthesizer.TimeoutNext(1);
+        var id = await Upload(http, await TopicId(http), 60);
+        var detail = await WaitForStatus(http, id, "Done");
+        Assert.Equal(8, detail.GetProperty("evaluation").GetProperty("score").GetInt32());
 
+        if (timeout) api.Synthesizer.TimeoutNext(1);
+        else api.Synthesizer.FailNext(1);
         try
         {
-            var detail = await WaitForStatus(http, await Upload(http, await TopicId(http), 60), "Done");
-            Assert.Equal(8, detail.GetProperty("evaluation").GetProperty("score").GetInt32());
-            Assert.Equal(writerTimeout, detail.GetProperty("hasReviewAudio").GetBoolean());
-            Assert.False(string.IsNullOrWhiteSpace(detail.GetProperty("reviewText").GetString()));
-            if (writerTimeout)
-                Assert.StartsWith("Хорошо, думаю, 8 из 10.", detail.GetProperty("reviewText").GetString(), StringComparison.Ordinal);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync($"/attempts/{id}/review-audio")).StatusCode);
+            Assert.Empty(ReviewFiles(id));
         }
         finally
         {
-            api.ReviewWriter.TimeoutNext(0);
+            api.Synthesizer.FailNext(0);
             api.Synthesizer.TimeoutNext(0);
         }
+
+        Assert.Equal(detail.GetProperty("reviewText").GetString(), await ReviewText(http, detail));
     }
 
     [Fact]
@@ -304,7 +293,9 @@ public class ApiFlowTests(ApiFixture api)
         var device = Guid.NewGuid().ToString();
         var http = await api.SignIn(device);
         var id = await Upload(http, await TopicId(http), 60);
+        await WaitForStatus(http, id, "Done");
         var gate = api.Synthesizer.BlockNext();
+        var play = http.GetAsync($"/attempts/{id}/review-audio");
         await gate.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         var deletion = deleteAccount
@@ -320,6 +311,7 @@ public class ApiFlowTests(ApiFixture api)
             gate.Release();
         }
 
+        Assert.Equal(HttpStatusCode.OK, (await play).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await deletion).StatusCode);
         Assert.Empty(ReviewFiles(id));
         if (deleteAccount)

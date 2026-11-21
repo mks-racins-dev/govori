@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Govori.Api;
 
 /// <summary>
-/// Processes attempts in the Processing state: transcribe, analyze, evaluate, save.
+/// Processes attempts in the Processing state: transcribe, analyze, evaluate (with the review text), save.
 /// The database is the queue, so pending work survives restarts. Single-instance by design.
 /// </summary>
 public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWorker> log) : BackgroundService
@@ -67,7 +67,6 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
         var sp = scope.ServiceProvider;
         var db = sp.GetRequiredService<GovoriDbContext>();
         var attempt = await db.Attempts.Include(a => a.Topic).Include(a => a.Evaluation).FirstAsync(a => a.Id == attemptId, ct);
-        string? uploadedReviewKey = null;
 
         try
         {
@@ -92,8 +91,17 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
             var metrics = SpeechAnalyzer.Analyze(attempt.Transcript, attempt.DurationSec,
                 SettingDefaults.Lines(await content.GetAsync(SettingKeys.FillersSingle, ct)).ToHashSet(),
                 SettingDefaults.Lines(await content.GetAsync(SettingKeys.FillersPhrases, ct)));
-            var result = await sp.GetRequiredService<ISpeechEvaluator>()
-                .EvaluateAsync(attempt.Topic!.Text, attempt.Transcript, metrics, ct);
+
+            // The previous result and recent reviews let the spoken review talk about progress without repeating itself.
+            var earlier = db.Attempts.Where(a => a.UserId == attempt.UserId && a.Id != attempt.Id && a.CreatedAt < attempt.CreatedAt);
+            var previousJson = await earlier.Where(a => a.Status == AttemptStatus.Done && a.Evaluation != null)
+                .OrderByDescending(a => a.CreatedAt).Select(a => a.Evaluation!.Json).FirstOrDefaultAsync(ct);
+            var recent = await earlier.Where(a => a.ReviewText != null)
+                .OrderByDescending(a => a.CreatedAt).Select(a => a.ReviewText!).Take(3).ToListAsync(ct);
+            var previous = previousJson is null ? null : JsonSerializer.Deserialize<StoredEvaluation>(previousJson, Json)?.Result;
+
+            var (result, review) = await sp.GetRequiredService<ISpeechEvaluator>()
+                .EvaluateAsync(new EvaluationRequest(attempt.Topic!.Text, attempt.Transcript, metrics, previous, recent), ct);
 
             var json = JsonSerializer.Serialize(new StoredEvaluation(result, metrics), Json);
             if (attempt.Evaluation is null)
@@ -101,7 +109,8 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
             else
                 (attempt.Evaluation.Score, attempt.Evaluation.Json) = (result.Score, json);
 
-            uploadedReviewKey = await VoiceReviewAsync(sp, db, attempt, result, metrics, ct);
+            // The text is voiced later, only if the user presses play (see the review-audio endpoint).
+            attempt.ReviewText = review ?? ReviewScript.Build(result, previous);
             attempt.Status = AttemptStatus.Done;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
@@ -111,68 +120,6 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
             attempt.FailureReason = await sp.GetRequiredService<IContentProvider>().GetAsync(SettingKeys.EvaluationFailed, ct);
         }
 
-        try
-        {
-            await db.SaveChangesAsync(ct);
-        }
-        catch
-        {
-            if (uploadedReviewKey is not null)
-            {
-                try
-                {
-                    await sp.GetRequiredService<IAudioStorage>().DeleteAsync(uploadedReviewKey, CancellationToken.None);
-                }
-                catch (Exception ex)
-                {
-                    log.LogError(ex, "Failed to clean up review audio for attempt {AttemptId}", attempt.Id);
-                }
-            }
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Writes an informal spoken review (aware of the previous result and recent reviews) and voices it.
-    /// Optional: without a synthesizer or on failure the text review is still shown.
-    /// </summary>
-    private async Task<string?> VoiceReviewAsync(
-        IServiceProvider sp, GovoriDbContext db, Attempt attempt, EvaluationResult result, SpeechMetrics metrics, CancellationToken ct)
-    {
-        if (sp.GetService<ISpeechSynthesizer>() is not { } synthesizer) return null;
-        try
-        {
-            var earlier = db.Attempts.Where(a => a.UserId == attempt.UserId && a.Id != attempt.Id && a.CreatedAt < attempt.CreatedAt);
-            var previousJson = await earlier.Where(a => a.Status == AttemptStatus.Done && a.Evaluation != null)
-                .OrderByDescending(a => a.CreatedAt).Select(a => a.Evaluation!.Json).FirstOrDefaultAsync(ct);
-            var recent = await earlier.Where(a => a.ReviewText != null)
-                .OrderByDescending(a => a.CreatedAt).Select(a => a.ReviewText!).Take(3).ToListAsync(ct);
-            var previous = previousJson is null ? null : JsonSerializer.Deserialize<StoredEvaluation>(previousJson, Json)?.Result;
-
-            var context = new ReviewContext(attempt.Topic!.Text, result, metrics, previous, recent);
-            string text;
-            try
-            {
-                text = await sp.GetRequiredService<IReviewWriter>().WriteAsync(context, ct);
-            }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
-                log.LogWarning(ex, "Review writing failed for attempt {AttemptId}; using template", attempt.Id);
-                text = ReviewScript.Build(result, previous);
-            }
-
-            attempt.ReviewText = text;
-            var mp3 = await synthesizer.SynthesizeAsync(text, ct);
-            var key = $"{attempt.UserId}/{attempt.Id}.review.mp3";
-            using var stream = new MemoryStream(mp3);
-            await sp.GetRequiredService<IAudioStorage>().SaveAsync(key, stream, ct);
-            attempt.ReviewAudioKey = key;
-            return key;
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            log.LogWarning(ex, "Review voice-over failed for attempt {AttemptId}", attempt.Id);
-            return null;
-        }
+        await db.SaveChangesAsync(ct);
     }
 }
