@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Claims;
 using System.Text.Json;
 using Govori.Core;
@@ -11,10 +10,8 @@ public static class Endpoints
 {
     private const int DailyAttemptLimit = 20;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> ReviewLocks = new();
-
-    private static SemaphoreSlim ReviewLock(Guid attemptId) =>
-        ReviewLocks.GetOrAdd(attemptId, _ => new SemaphoreSlim(1, 1));
+    // Serializes voicing and deleting one attempt's review audio. Entries are dropped once released.
+    private static readonly KeyedLock<Guid> ReviewLocks = new();
 
     public record TopicDto(int Id, string Text, string Category);
     public record AttemptSummary(Guid Id, string Topic, string Category, AttemptStatus Status, int? Score, int DurationSec, DateTime CreatedAt);
@@ -145,8 +142,7 @@ public static class Endpoints
             IServiceProvider services, ILogger<EvaluationWorker> log, CancellationToken ct) =>
         {
             var userId = user.UserId();
-            var reviewLock = ReviewLock(id);
-            await reviewLock.WaitAsync(ct);
+            var reviewLock = await ReviewLocks.AcquireAsync(id, ct);
             try
             {
                 var a = await db.Attempts.FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId, ct);
@@ -197,7 +193,7 @@ public static class Endpoints
             }
             finally
             {
-                reviewLock.Release();
+                reviewLock.Dispose();
             }
         });
 
@@ -217,12 +213,10 @@ public static class Endpoints
         g.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal user, GovoriDbContext db, IAudioStorage storage, CancellationToken ct) =>
         {
             await EvaluationWorker.ProcessingLock.WaitAsync(ct);
-            var reviewLock = ReviewLock(id);
-            var reviewLockHeld = false;
+            IDisposable? reviewLock = null;
             try
             {
-                await reviewLock.WaitAsync(ct);
-                reviewLockHeld = true;
+                reviewLock = await ReviewLocks.AcquireAsync(id, ct);
                 var a = await db.Attempts.Include(x => x.Evaluation).FirstOrDefaultAsync(x => x.Id == id && x.UserId == user.UserId(), ct);
                 if (a is null) return Results.NotFound();
 
@@ -234,7 +228,7 @@ public static class Endpoints
             }
             finally
             {
-                if (reviewLockHeld) reviewLock.Release();
+                reviewLock?.Dispose();
                 EvaluationWorker.ProcessingLock.Release();
             }
         });
@@ -269,8 +263,7 @@ public static class Endpoints
                 var attempts = await db.Attempts.Include(a => a.Evaluation).Where(a => a.UserId == userId).ToListAsync(ct);
                 foreach (var a in attempts)
                 {
-                    var reviewLock = ReviewLock(a.Id);
-                    await reviewLock.WaitAsync(ct);
+                    var reviewLock = await ReviewLocks.AcquireAsync(a.Id, ct);
                     try
                     {
                         await storage.DeleteAsync(a.AudioKey, ct);
@@ -282,7 +275,7 @@ public static class Endpoints
                     }
                     finally
                     {
-                        reviewLock.Release();
+                        reviewLock.Dispose();
                     }
                 }
                 db.Attempts.RemoveRange(attempts);

@@ -150,3 +150,37 @@ public class ReviewScriptTests
     public void Same_score_is_called_stable() =>
         Assert.StartsWith("Стабильно: снова 6 из 10.", ReviewScript.Build(Eval(6), Eval(6)), StringComparison.Ordinal);
 }
+
+public class KeyedLockTests
+{
+    [Fact]
+    public async Task Same_key_waits_and_entries_are_dropped_after_release()
+    {
+        var locks = new KeyedLock<int>();
+        var first = await locks.AcquireAsync(1, CancellationToken.None);
+        var second = locks.AcquireAsync(1, CancellationToken.None);
+        var other = await locks.AcquireAsync(2, CancellationToken.None);
+
+        Assert.False(second.IsCompleted);
+        Assert.Equal(2, locks.Count);
+
+        first.Dispose();
+        (await second.WaitAsync(TimeSpan.FromSeconds(5))).Dispose();
+        other.Dispose();
+        Assert.Equal(0, locks.Count);
+    }
+
+    [Fact]
+    public async Task Cancelled_waiter_leaves_no_entry()
+    {
+        var locks = new KeyedLock<int>();
+        var held = await locks.AcquireAsync(1, CancellationToken.None);
+        using var cts = new CancellationTokenSource();
+        var waiting = locks.AcquireAsync(1, cts.Token);
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
+        held.Dispose();
+        Assert.Equal(0, locks.Count);
+    }
+}
