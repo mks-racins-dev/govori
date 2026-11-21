@@ -274,7 +274,11 @@ public static class Endpoints
                     try
                     {
                         await storage.DeleteAsync(a.AudioKey, ct);
-                        if (a.ReviewAudioKey is not null) await storage.DeleteAsync(a.ReviewAudioKey, ct);
+                        // Re-read under the lock: a voice-over that finished while we waited has saved a key
+                        // the list loaded above doesn't have yet.
+                        var reviewKey = await db.Attempts.Where(x => x.Id == a.Id)
+                            .Select(x => x.ReviewAudioKey).FirstOrDefaultAsync(ct);
+                        if (reviewKey is not null) await storage.DeleteAsync(reviewKey, ct);
                     }
                     finally
                     {
