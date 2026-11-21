@@ -4,7 +4,7 @@ using Govori.Core;
 
 namespace Govori.Infrastructure;
 
-public class OpenAiTranscriber(HttpClient http, IContentProvider content, string apiKey, string model = "gpt-4o-transcribe") : ITranscriber
+public class OpenAiTranscriber(HttpClient http, IContentProvider content, string apiKey, string model = "gpt-4o-mini-transcribe") : ITranscriber
 {
     public async Task<string> TranscribeAsync(Stream audio, string fileName, CancellationToken ct)
     {

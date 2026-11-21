@@ -13,12 +13,13 @@ public class MockTranscriber : ITranscriber
 /// <summary>Used when no Anthropic key is configured.</summary>
 public class MockSpeechEvaluator : ISpeechEvaluator
 {
-    public Task<EvaluationResult> EvaluateAsync(string topic, string transcript, SpeechMetrics metrics, CancellationToken ct) =>
-        Task.FromResult(new EvaluationResult(
+    // No review text: the worker falls back to the template review.
+    public Task<Evaluated> EvaluateAsync(EvaluationRequest request, CancellationToken ct) =>
+        Task.FromResult(new Evaluated(new EvaluationResult(
             Score: 7,
             SubScores: new SubScores(7, 8, 6, 6, 7),
             Summary: "Это демонстрационная оценка. Добавьте ключ Anthropic, чтобы получать настоящий разбор.",
             Strengths: ["Вы уверенно начали выступление", "Мысль соответствовала теме"],
             Improvements: ["Меньше слов-паразитов", "Добавьте чёткий вывод в конце"],
-            Suggestions: ["Используйте структуру «тезис — пример — вывод»", "Делайте паузу вместо «э-э»"]));
+            Suggestions: ["Используйте структуру «тезис — пример — вывод»", "Делайте паузу вместо «э-э»"]), Review: null));
 }

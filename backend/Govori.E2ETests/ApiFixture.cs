@@ -25,7 +25,6 @@ public sealed class ApiFixture : IAsyncLifetime
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
     public FakeEvaluator Evaluator { get; } = new();
     public FakeTranscriber Transcriber { get; } = new();
-    public FakeReviewWriter ReviewWriter { get; } = new();
     public FakeSynthesizer Synthesizer { get; } = new();
     public string StoragePath => _storage;
 
@@ -49,7 +48,6 @@ public sealed class ApiFixture : IAsyncLifetime
             {
                 s.AddSingleton<ITranscriber>(Transcriber);
                 s.AddSingleton<ISpeechEvaluator>(Evaluator);
-                s.AddSingleton<IReviewWriter>(ReviewWriter);
                 s.AddSingleton<ISpeechSynthesizer>(Synthesizer);
             });
         });
@@ -121,42 +119,33 @@ public sealed class FakeTranscriber : ITranscriber
     public Task<string> TranscribeAsync(Stream audio, string fileName, CancellationToken ct) => Task.FromResult(Next ?? DefaultText);
 }
 
+/// <summary>Writes the review as "review#N prev=S recent=[ids]" so tests can see what context it was given.</summary>
 public sealed class FakeEvaluator : ISpeechEvaluator
 {
     private int _failuresLeft;
+    private int _missingReviewsLeft;
+    private int _reviews;
     public int Score { get; set; } = 8;
     private int _calls;
     public int Calls => Volatile.Read(ref _calls);
 
     public void FailNext(int times) => _failuresLeft = times;
 
-    public Task<EvaluationResult> EvaluateAsync(string topic, string transcript, SpeechMetrics metrics, CancellationToken ct)
+    /// <summary>The next evaluations come back without review text, as when the model leaves it empty.</summary>
+    public void OmitReviewNext(int times) => _missingReviewsLeft = times;
+
+    public Task<Evaluated> EvaluateAsync(EvaluationRequest request, CancellationToken ct)
     {
         Interlocked.Increment(ref _calls);
         if (Interlocked.Decrement(ref _failuresLeft) >= 0) throw new HttpRequestException("AI provider is down (simulated)");
-        return Task.FromResult(new EvaluationResult(Score, new SubScores(8, 9, 7, 8, 8), "Хорошее выступление.",
-            ["Чёткий старт"], ["Меньше «ну»"], ["Начинайте с главной мысли"]));
-    }
-}
+        var result = new EvaluationResult(Score, new SubScores(8, 9, 7, 8, 8), "Хорошее выступление.",
+            ["Чёткий старт"], ["Меньше «ну»"], ["Начинайте с главной мысли"]);
+        if (Interlocked.Decrement(ref _missingReviewsLeft) >= 0) return Task.FromResult(new Evaluated(result, null));
 
-/// <summary>Writes "review#N prev=S recent=[ids]" so tests can see what context the writer was given.</summary>
-public sealed class FakeReviewWriter : IReviewWriter
-{
-    private int _failuresLeft;
-    private int _timeoutsLeft;
-    private int _count;
-
-    public void FailNext(int times) => _failuresLeft = times;
-    public void TimeoutNext(int times) => _timeoutsLeft = times;
-
-    public Task<string> WriteAsync(ReviewContext context, CancellationToken ct)
-    {
-        if (Interlocked.Decrement(ref _timeoutsLeft) >= 0) throw new TaskCanceledException("Claude timed out (simulated)");
-        if (Interlocked.Decrement(ref _failuresLeft) >= 0) throw new HttpRequestException("Claude is down (simulated)");
-        var n = Interlocked.Increment(ref _count);
-        var prev = context.Previous?.Score.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none";
-        var recent = string.Join(",", context.RecentReviews.Select(r => r.Split(' ')[0]));
-        return Task.FromResult($"review#{n} prev={prev} recent=[{recent}]");
+        var n = Interlocked.Increment(ref _reviews);
+        var prev = request.Previous?.Score.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none";
+        var recent = string.Join(",", request.RecentReviews.Select(r => r.Split(' ')[0]));
+        return Task.FromResult(new Evaluated(result, $"review#{n} prev={prev} recent=[{recent}]"));
     }
 }
 
@@ -166,6 +155,8 @@ public sealed class FakeSynthesizer : ISpeechSynthesizer
     private int _failuresLeft;
     private int _timeoutsLeft;
     private SynthesisGate? _nextGate;
+    private int _calls;
+    public int Calls => Volatile.Read(ref _calls);
 
     public void FailNext(int times) => _failuresLeft = times;
     public void TimeoutNext(int times) => _timeoutsLeft = times;
@@ -179,6 +170,7 @@ public sealed class FakeSynthesizer : ISpeechSynthesizer
 
     public async Task<byte[]> SynthesizeAsync(string text, CancellationToken ct)
     {
+        Interlocked.Increment(ref _calls);
         var gate = Interlocked.Exchange(ref _nextGate, null);
         if (gate is not null)
         {
