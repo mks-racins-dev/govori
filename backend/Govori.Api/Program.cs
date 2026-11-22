@@ -43,7 +43,7 @@ else
 if (!string.IsNullOrWhiteSpace(openAiKey))
     builder.Services.AddHttpClient<ISpeechSynthesizer, OpenAiSpeechSynthesizer>((http, sp) =>
         new OpenAiSpeechSynthesizer(http, sp.GetRequiredService<IContentProvider>(), openAiKey,
-            config["OpenAI:TtsModel"] ?? "gpt-4o-mini-tts", config["OpenAI:TtsVoice"] ?? "alloy"));
+            config["OpenAI:TtsModel"] ?? "gpt-4o-mini-tts", config["OpenAI:TtsVoice"] ?? "nova"));
 
 var anthropicKey = config["Anthropic:ApiKey"];
 if (string.IsNullOrWhiteSpace(anthropicKey))
