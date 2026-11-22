@@ -104,6 +104,9 @@
   "result.subScores.vocabulary": "Словарь",
   "result.subScores.fluency": "Плавность",
   "result.subScores.pace": "Темп",
+  "interests.title": "Категории",
+  "interests.subtitle": "Выключенные категории не попадаются в случайных темах. Включить их можно здесь в любой момент.",
+  "interests.lastOne": "Хотя бы одна категория должна остаться включённой",
   "history.title": "История",
   "history.all": "Все",
   "history.processing": "Анализ…",
@@ -121,6 +124,7 @@
   "profile.signOut": "Выйти",
   "profile.deleteAccount": "Удалить аккаунт",
   "profile.deleteConfirm": "Все ваши записи и оценки будут удалены навсегда. Продолжить?",
+  "profile.interests": "Интересные категории",
   "profile.criteria": "По критериям",
   "profile.criteriaHint": "Средний балл из 2 за последние выступления"
 }

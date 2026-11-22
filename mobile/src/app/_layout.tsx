@@ -53,6 +53,7 @@ function Navigator() {
         <Stack.Screen name="topic" options={{ presentation: 'modal' }} />
         <Stack.Screen name="record" options={{ gestureEnabled: false }} />
         <Stack.Screen name="attempt/[id]" />
+        <Stack.Screen name="interests" />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="onboarding" />

@@ -68,6 +68,42 @@ public class ApiFlowTests(ApiFixture api)
     }
 
     [Fact]
+    public async Task Hidden_categories_are_skipped_in_random_picks_and_can_be_restored()
+    {
+        var http = await api.SignIn();
+        var names = (await http.GetFromJsonAsync<JsonElement>("/categories")).EnumerateArray()
+            .Select(c => c.GetProperty("name").GetString()!).ToList();
+        var keep = names[0];
+        var hide = names.Skip(1).ToList();
+
+        // Hiding every category is refused.
+        var all = await http.PutAsJsonAsync("/me/hidden-categories", new { categories = names });
+        Assert.Equal(HttpStatusCode.BadRequest, all.StatusCode);
+
+        var res = await http.PutAsJsonAsync("/me/hidden-categories", new { categories = hide });
+        Assert.Equal(HttpStatusCode.NoContent, res.StatusCode);
+
+        var listed = await http.GetFromJsonAsync<JsonElement>("/categories");
+        Assert.All(listed.EnumerateArray(), c =>
+            Assert.Equal(c.GetProperty("name").GetString() != keep, c.GetProperty("hidden").GetBoolean()));
+
+        for (var i = 0; i < 10; i++)
+        {
+            var topic = await http.GetFromJsonAsync<JsonElement>("/topics/random");
+            Assert.Equal(keep, topic.GetProperty("category").GetString());
+        }
+
+        // Picking a hidden category explicitly still works.
+        var explicitPick = await http.GetFromJsonAsync<JsonElement>($"/topics/random?category={Uri.EscapeDataString(hide[0])}");
+        Assert.Equal(hide[0], explicitPick.GetProperty("category").GetString());
+
+        // Turning everything back on.
+        await http.PutAsJsonAsync("/me/hidden-categories", new { categories = Array.Empty<string>() });
+        Assert.All((await http.GetFromJsonAsync<JsonElement>("/categories")).EnumerateArray(),
+            c => Assert.False(c.GetProperty("hidden").GetBoolean()));
+    }
+
+    [Fact]
     public async Task Full_flow_topic_record_evaluate_review_delete()
     {
         var http = await api.SignIn();

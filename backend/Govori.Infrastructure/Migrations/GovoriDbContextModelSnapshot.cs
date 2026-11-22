@@ -138,6 +138,21 @@ namespace Govori.Infrastructure.Migrations
                     b.ToTable("Evaluations");
                 });
 
+            modelBuilder.Entity("Govori.Core.HiddenCategory", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CategoryId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("UserId", "CategoryId");
+
+                    b.HasIndex("CategoryId");
+
+                    b.ToTable("HiddenCategories");
+                });
+
             modelBuilder.Entity("Govori.Core.Topic", b =>
                 {
                     b.Property<int>("Id")
@@ -236,6 +251,21 @@ namespace Govori.Infrastructure.Migrations
                     b.HasOne("Govori.Core.Attempt", null)
                         .WithOne("Evaluation")
                         .HasForeignKey("Govori.Core.Evaluation", "AttemptId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Govori.Core.HiddenCategory", b =>
+                {
+                    b.HasOne("Govori.Core.Category", null)
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Govori.Core.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
