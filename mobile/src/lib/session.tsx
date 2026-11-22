@@ -6,19 +6,20 @@ import { Platform } from 'react-native';
 
 import { api } from './api';
 
+const TOKEN_KEY = 'govori.token';
+const DEVICE_KEY = 'govori.deviceId';
+
 /**
- * expo-secure-store has no web implementation. The web build (dev testing only) keeps the session token in
- * memory, never in browser storage, so reloading the page signs out; only the device id persists.
+ * expo-secure-store has no web implementation. The web build (dev testing only) keeps secrets in memory,
+ * never in browser storage, so reloading the page signs out.
  */
 const webMemory = new Map<string, string>();
 const SecureStore =
   Platform.OS === 'web'
     ? {
-        getItemAsync: async (k: string) =>
-          k === DEVICE_KEY ? (globalThis.localStorage?.getItem(k) ?? null) : (webMemory.get(k) ?? null),
+        getItemAsync: async (k: string) => webMemory.get(k) ?? null,
         setItemAsync: async (k: string, v: string) => {
-          if (k === DEVICE_KEY) globalThis.localStorage?.setItem(k, v);
-          else webMemory.set(k, v);
+          webMemory.set(k, v);
         },
         deleteItemAsync: async (k: string) => {
           webMemory.delete(k);
@@ -26,9 +27,15 @@ const SecureStore =
       }
     : NativeSecureStore;
 
-
-const TOKEN_KEY = 'govori.token';
-const DEVICE_KEY = 'govori.deviceId';
+/** The device id is not a secret; on web it lives in localStorage so dev login keeps the same account. */
+const DeviceStore = {
+  get: async () =>
+    Platform.OS === 'web' ? (globalThis.localStorage?.getItem(DEVICE_KEY) ?? null) : NativeSecureStore.getItemAsync(DEVICE_KEY),
+  set: async (id: string) => {
+    if (Platform.OS === 'web') globalThis.localStorage?.setItem(DEVICE_KEY, id);
+    else await NativeSecureStore.setItemAsync(DEVICE_KEY, id);
+  },
+};
 
 let cachedToken: string | null = null;
 
@@ -76,10 +83,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setSignedIn(true);
     },
     async signInDev() {
-      let deviceId = await SecureStore.getItemAsync(DEVICE_KEY);
+      let deviceId = await DeviceStore.get();
       if (!deviceId) {
         deviceId = Crypto.randomUUID();
-        await SecureStore.setItemAsync(DEVICE_KEY, deviceId);
+        await DeviceStore.set(deviceId);
       }
       const { token } = await api.devLogin(deviceId);
       await saveToken(token);
