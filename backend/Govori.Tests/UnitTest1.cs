@@ -73,7 +73,8 @@ public class ClaudeEvaluatorTests
          "conclusion":{"points":-1,"evidence":"обрыв","toMax":"итог"},
          "coherence":{"points":2,"evidence":"по теме","toMax":""},
          "skeleton":{"point":"мысль","reason":null,"example":"  ","conclusion":null},
-         "summary":"Хорошо","strength":"a","fix":"b","exercise":"c","review":"  Привет! Неплохо, 6 из 10. "}
+         "summary":"Хорошо","strength":"a","fix":"b","exercise":"c","drill":" Подберите 5 замен слову «очень». ",
+         "review":"  Привет! Неплохо, 6 из 10. "}
         """;
 
     [Fact]
@@ -89,6 +90,17 @@ public class ClaudeEvaluatorTests
         Assert.Equal(2 + 1 + 0 + 2 + 2, r.Score);
         Assert.Equal(["a"], r.Strengths);
         Assert.Equal("Привет! Неплохо, 6 из 10.", review);
+    }
+
+    [Fact]
+    public void Drill_is_kept_only_when_the_app_found_the_vocabulary_monotonous()
+    {
+        var low = GoodDelivery with { Vocabulary = new VocabularyStats(0.5, [new("очень", 5)], IsLow: true) };
+        var fine = GoodDelivery with { Vocabulary = new VocabularyStats(0.8, [], IsLow: false) };
+
+        Assert.Equal("Подберите 5 замен слову «очень».", ClaudeEvaluator.ParseResponse(Wrap(Reply), low).Result.Drill);
+        Assert.Null(ClaudeEvaluator.ParseResponse(Wrap(Reply), fine).Result.Drill);
+        Assert.Null(ClaudeEvaluator.ParseResponse(Wrap(Reply), GoodDelivery).Result.Drill);
     }
 
     [Fact]
@@ -222,4 +234,40 @@ public class ClarityTests
 
     [Fact]
     public void No_words_means_unknown_clarity() => Assert.Null(Clarity.FromTokens([]).Clarity);
+}
+
+public class VocabularyTests
+{
+    private static readonly HashSet<string> Fillers = ["типа", "короче"];
+
+    [Fact]
+    public void Repeated_words_make_speech_monotonous_and_topic_words_are_ignored()
+    {
+        const string text =
+            "Понедельник очень хороший день. Понедельника все ждут, понедельник очень важный. Это очень хороший " +
+            "старт недели, очень хороший повод начать новое дело, очень хороший шанс. Потому что хороший план " +
+            "помогает всей неделе, и это очень хорошо для всех людей вокруг нас, правда хорошо.";
+        var v = Vocabulary.Analyze(text, "Понедельник — лучший день недели", Fillers)!;
+
+        Assert.True(v.IsLow);
+        Assert.Equal(new WordRepeat("хороший", 7), v.Repeats[0]); // forms merged: хороший ×5 + хорошо ×2
+        Assert.Equal(new WordRepeat("очень", 6), v.Repeats[1]);
+        Assert.DoesNotContain(v.Repeats, r => r.Word.StartsWith("понед", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Varied_speech_is_not_flagged()
+    {
+        const string text =
+            "Скука полезна, потому что мозгу нужно пустое время. Сорок минут я смотрел в стену и придумал, " +
+            "как переделать отчёт. Начальник потом хвалил результат. Когда мы заполняем каждую свободную секунду " +
+            "лентой, мы лишаем себя этого времени. Поэтому совет простой: станет скучно — не хватайтесь за телефон.";
+        var v = Vocabulary.Analyze(text, "Скука полезна", Fillers)!;
+
+        Assert.False(v.IsLow);
+        Assert.Empty(v.Repeats);
+    }
+
+    [Fact]
+    public void Too_little_speech_is_not_judged() => Assert.Null(Vocabulary.Analyze("Ну вот такой короткий ответ получился.", "Тема", Fillers));
 }

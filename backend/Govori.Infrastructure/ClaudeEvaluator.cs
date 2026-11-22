@@ -22,7 +22,8 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
         "Итоговая оценка из 10 — это сумма твоих баллов за четыре критерия и балла за подачу из данных; " +
         "в review называй именно её. " +
         "Советуй только то, что можно сделать в следующем выступлении в приложении: никаких записей на бумаге, " +
-        "заметок, диктофона, зеркала и упражнений вне приложения. " +
+        "заметок, диктофона и зеркала. Единственное упражнение вне выступления — устное упражнение на словарь " +
+        "из поля drill, если оно есть; его можно упомянуть одной фразой. " +
         "Голос тренера женский: о себе в прошедшем времени говори в женском роде («я послушала», «мне понравилось»). " +
         "К нему относятся только правила ниже, в том числе обращение на «ты».\n\n";
 
@@ -90,6 +91,11 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
         sb.AppendLine(inv, $"Длительность: {m.DurationSec} с");
         sb.AppendLine(inv, $"Слов: {m.WordCount}, темп: {m.WordsPerMinute} слов/мин");
         sb.AppendLine(inv, $"Слова-паразиты: {fillers}");
+        if (m.Vocabulary is { } v)
+        {
+            var repeats = v.Repeats.Count == 0 ? "нет" : string.Join(", ", v.Repeats.Select(r => $"«{r.Word}» ×{r.Count}"));
+            sb.AppendLine(inv, $"Словарь (посчитан приложением): {(v.IsLow ? "однообразный" : "в норме")}, разнообразие {v.Diversity:0.00}, повторы: {repeats}");
+        }
         var delivery = Delivery.Score(m);
         sb.AppendLine(inv, $"Подача (посчитана приложением): {delivery.Points}/2");
         sb.AppendLine();
@@ -157,7 +163,9 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
             rubric.Total, null, reply.Summary?.Trim() ?? "",
             One(reply.Strength), One(reply.Fix), One(reply.Exercise),
             rubric,
-            new Skeleton(Quote(sk?.Point), Quote(sk?.Reason), Quote(sk?.Example), Quote(sk?.Conclusion)));
+            new Skeleton(Quote(sk?.Point), Quote(sk?.Reason), Quote(sk?.Example), Quote(sk?.Conclusion)),
+            // The app decides whether a drill is due; the model only writes it.
+            metrics.Vocabulary is { IsLow: true } ? Quote(reply.Drill) : null);
         return new Evaluated(result, string.IsNullOrWhiteSpace(reply.Review) ? null : reply.Review.Trim());
     }
 
@@ -165,7 +173,8 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
     private sealed record ReplySkeleton(string? Point, string? Reason, string? Example, string? Conclusion);
     private sealed record Reply(
         ReplyCriterion? Thought, ReplyCriterion? Support, ReplyCriterion? Conclusion, ReplyCriterion? Coherence,
-        ReplySkeleton? Skeleton, string? Summary, string? Strength, string? Fix, string? Exercise, string? Review);
+        ReplySkeleton? Skeleton, string? Summary, string? Strength, string? Fix, string? Exercise, string? Drill,
+        string? Review);
 
     private static JsonObject Schema()
     {
@@ -211,10 +220,11 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
                 ["strength"] = Str(),
                 ["fix"] = Str(),
                 ["exercise"] = Str(),
+                ["drill"] = Str("Упражнение на словарь, если словарь однообразный; иначе пустая строка"),
                 ["review"] = Str("Голосовое сообщение тренера по правилам раздела «Поле review»"),
             },
             ["required"] = new JsonArray("thought", "support", "conclusion", "coherence", "skeleton",
-                "summary", "strength", "fix", "exercise", "review"),
+                "summary", "strength", "fix", "exercise", "drill", "review"),
             ["additionalProperties"] = false,
         };
     }

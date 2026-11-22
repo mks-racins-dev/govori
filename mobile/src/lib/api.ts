@@ -58,6 +58,8 @@ export type Evaluation = {
   subScores: SubScores | null;
   rubric: Rubric | null;
   skeleton: Skeleton | null;
+  /** A vocabulary drill, only when the speech was monotonous. */
+  drill?: string | null;
   summary: string;
   strengths: string[];
   improvements: string[];
@@ -72,6 +74,8 @@ export type Metrics = {
   /** Share of words heard clearly (0–1); null when unknown. */
   clarity?: number | null;
   unclearWords?: string[] | null;
+  /** How varied the vocabulary was; null when there was too little speech. Not scored. */
+  vocabulary?: { diversity: number; repeats: { word: string; count: number }[]; isLow: boolean } | null;
 };
 
 export type AttemptDetail = {
