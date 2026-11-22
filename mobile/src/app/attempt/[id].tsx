@@ -6,8 +6,8 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 import { AttemptPlayer, ReviewPlayer } from '@/components/audio-player';
 import { ChevronIcon, TrashIcon } from '@/components/icons';
 import { Badge, Button, Card, Centered, Header, Muted, Screen } from '@/components/ui';
-import { t } from '@/i18n/ru';
-import { api, Evaluation, SubScores } from '@/lib/api';
+import { fmt, t } from '@/i18n/ru';
+import { api, Criterion, Evaluation, Rubric, RubricKey, Skeleton, SubScores } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { colors, fonts, radius, spacing, type } from '@/theme';
 
@@ -111,19 +111,35 @@ export default function AttemptScreen() {
         </Card>
       )}
 
-      {ev && (
-        <Card style={{ gap: spacing(1.75) }}>
-          <SubScoreBars scores={ev.subScores} />
+      {ev?.rubric && <ToTenCard rubric={ev.rubric} />}
+
+      {ev?.rubric ? (
+        <Card style={{ gap: spacing(2) }}>
+          <RubricRows rubric={ev.rubric} />
         </Card>
+      ) : (
+        ev?.subScores && (
+          <Card style={{ gap: spacing(1.75) }}>
+            <SubScoreBars scores={ev.subScores} />
+          </Card>
+        )
       )}
 
       {data.metrics && (
         <View style={styles.stats}>
           <Stat value={data.metrics.wordsPerMinute} label={t.result.wpm} />
-          <Stat value={data.metrics.wordCount} label={t.result.words} />
           <Stat value={fillerTotal} label={t.result.fillers.toLowerCase()} />
+          {data.metrics.clarity != null ? (
+            <Stat value={`${Math.round(data.metrics.clarity * 100)}%`} label={t.result.clarity} />
+          ) : (
+            <Stat value={data.metrics.wordCount} label={t.result.words} />
+          )}
         </View>
       )}
+
+      {ev?.skeleton && <SkeletonCard skeleton={ev.skeleton} />}
+
+      {ev?.rubric && <AdviceCard evaluation={ev} />}
 
       {ev && <ReviewCard attemptId={data.id} evaluation={ev} reviewText={data.reviewText} hasAudio={data.hasReviewAudio} />}
 
@@ -132,11 +148,108 @@ export default function AttemptScreen() {
           <Text style={type.overline}>{t.result.transcript}</Text>
           <Transcript text={data.transcript} fillers={Object.keys(data.metrics?.fillerWords ?? {})} />
           {data.metrics && <FillerChips fillers={data.metrics.fillerWords} />}
+          {!!data.metrics?.unclearWords?.length && (
+            <Muted>{fmt(t.result.unclear, { words: data.metrics.unclearWords.join(', ') })}</Muted>
+          )}
         </Card>
       )}
 
       <Button label={t.result.again} onPress={() => router.replace('/topic')} />
     </Screen>
+  );
+}
+
+const RUBRIC_KEYS: RubricKey[] = ['thought', 'support', 'conclusion', 'coherence', 'delivery'];
+
+/** What separates this score from 10, biggest gains first. */
+function ToTenCard({ rubric }: { rubric: Rubric }) {
+  const gaps = RUBRIC_KEYS.map((key) => ({ key, gain: 2 - rubric[key].points, action: rubric[key].toMax }))
+    .filter((g) => g.gain > 0)
+    .sort((a, b) => b.gain - a.gain);
+  return (
+    <Card style={styles.toTen}>
+      <Text style={[type.overline, { color: colors.accent }]}>{gaps.length ? t.result.toTen : t.result.perfect}</Text>
+      {gaps.map((g) => (
+        <View key={g.key} style={styles.item}>
+          <Text style={styles.gain}>+{g.gain}</Text>
+          <Text style={[type.body, { flex: 1 }]}>{g.action || t.result.criteria[g.key]}</Text>
+        </View>
+      ))}
+    </Card>
+  );
+}
+
+function RubricRows({ rubric }: { rubric: Rubric }) {
+  return (
+    <>
+      {RUBRIC_KEYS.map((key) => (
+        <CriterionRow key={key} label={t.result.criteria[key]} criterion={rubric[key]} />
+      ))}
+    </>
+  );
+}
+
+function CriterionRow({ label, criterion }: { label: string; criterion: Criterion }) {
+  return (
+    <View style={{ gap: 4 }}>
+      <View style={styles.criterionHead}>
+        <Text style={type.heading}>{label}</Text>
+        <Points value={criterion.points} />
+      </View>
+      {!!criterion.evidence && <Text style={type.small}>{criterion.evidence}</Text>}
+    </View>
+  );
+}
+
+function Points({ value }: { value: number }) {
+  return (
+    <View style={styles.points} accessibilityLabel={`${value} из 2`}>
+      {[1, 2].map((i) => (
+        <View key={i} style={[styles.point, i <= value && { backgroundColor: colors.ink }]} />
+      ))}
+    </View>
+  );
+}
+
+const SKELETON_STEPS: (keyof Skeleton)[] = ['point', 'reason', 'example', 'conclusion'];
+
+/** The speech laid out on PREP steps, so the missing link is visible. */
+function SkeletonCard({ skeleton }: { skeleton: Skeleton }) {
+  return (
+    <Card style={{ gap: spacing(1.5) }}>
+      <Text style={type.overline}>{t.result.skeleton}</Text>
+      {SKELETON_STEPS.map((step) => {
+        const quote = skeleton[step];
+        return (
+          <View key={step} style={styles.step}>
+            <Text style={[styles.stepLabel, !quote && { color: colors.danger }]}>{t.result.skeletonSteps[step]}</Text>
+            <Text style={[type.small, { flex: 1 }, quote ? { color: colors.ink } : { color: colors.danger }]}>
+              {quote ? `«${quote}»` : t.result.missing}
+            </Text>
+          </View>
+        );
+      })}
+    </Card>
+  );
+}
+
+/** Toastmasters-style feedback: one thing that worked, one fix, one exercise. */
+function AdviceCard({ evaluation }: { evaluation: Evaluation }) {
+  const rows = [
+    { title: t.result.worked, text: evaluation.strengths[0] },
+    { title: t.result.fix, text: evaluation.improvements[0] },
+    { title: t.result.exercise, text: evaluation.suggestions[0] },
+  ].filter((r) => !!r.text);
+  if (rows.length === 0) return null;
+  return (
+    <Card style={{ gap: spacing(2) }}>
+      {rows.map((r) => (
+        <View key={r.title} style={{ gap: 4 }}>
+          <Text style={type.overline}>{r.title}</Text>
+          <Text style={type.body}>{r.text}</Text>
+        </View>
+      ))}
+    </Card>
   );
 }
 
@@ -214,7 +327,7 @@ function ReviewList({ title, items, mark }: { title: string; items: string[]; ma
   );
 }
 
-function Stat({ value, label }: { value: number; label: string }) {
+function Stat({ value, label }: { value: number | string; label: string }) {
   return (
     <Card style={styles.stat}>
       <Text style={type.title}>{value}</Text>
@@ -263,6 +376,13 @@ function Transcript({ text, fillers }: { text: string; fillers: string[] }) {
 }
 
 const styles = StyleSheet.create({
+  toTen: { backgroundColor: colors.accentTint, gap: spacing(1.5) },
+  gain: { fontFamily: fonts.bold, fontSize: 15, color: colors.accent, width: 28 },
+  criterionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  points: { flexDirection: 'row', gap: 4 },
+  point: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.line },
+  step: { flexDirection: 'row', gap: spacing(1.5), alignItems: 'flex-start' },
+  stepLabel: { fontFamily: fonts.semibold, fontSize: 13, color: colors.ink, width: 72 },
   hero: { alignItems: 'center', gap: spacing(1.25), paddingVertical: spacing(3.5) },
   scoreRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: spacing(1) },
   score: { fontFamily: fonts.semibold, fontSize: 72, letterSpacing: -3, lineHeight: 78, color: colors.ink },

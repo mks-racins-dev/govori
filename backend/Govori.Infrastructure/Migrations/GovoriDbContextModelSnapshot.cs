@@ -46,6 +46,9 @@ namespace Govori.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<double?>("Clarity")
+                        .HasColumnType("double precision");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -68,6 +71,9 @@ namespace Govori.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     b.Property<string>("Transcript")
+                        .HasColumnType("text");
+
+                    b.Property<string>("UnclearWords")
                         .HasColumnType("text");
 
                     b.Property<Guid>("UserId")
@@ -146,8 +152,20 @@ namespace Govori.Infrastructure.Migrations
                     b.Property<int>("Difficulty")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Genre")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Hint")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("Technique")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<string>("Text")
                         .IsRequired()

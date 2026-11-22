@@ -13,15 +13,18 @@ public static class Endpoints
     // Serializes voicing and deleting one attempt's review audio. Entries are dropped once released.
     private static readonly KeyedLock<Guid> ReviewLocks = new();
 
-    public record TopicDto(int Id, string Text, string Category);
+    public record TopicDto(int Id, string Text, string Category, string Genre, string Technique, string Hint, int Difficulty);
     public record AttemptSummary(Guid Id, string Topic, string Category, AttemptStatus Status, int? Score, int DurationSec, DateTime CreatedAt);
     public record AttemptDetail(
         Guid Id, TopicDto Topic, AttemptStatus Status, int DurationSec, DateTime CreatedAt,
         string? Transcript, string? FailureReason, EvaluationResult? Evaluation, SpeechMetrics? Metrics,
         string? ReviewText, bool HasReviewAudio);
-    public record MeDto(int Attempts, double? AverageScore, int? BestScore, int StreakDays);
+    /// <param name="Criteria">Average points (0–2) per rubric criterion over the last rubric-scored attempts; null before any.</param>
+    public record MeDto(int Attempts, double? AverageScore, int? BestScore, int StreakDays, Dictionary<string, double>? Criteria);
+    private const int CriteriaWindow = 10;
 
-    public record CategoryDto(string Name, string Description, string? Badge);
+    public record CategoryDto(string Name, string Description, string? Badge, int TopicCount);
+    public record GenreDto(string Name, int TopicCount);
     public record UiTextsDto(string Locale, DateTime UpdatedAt, Dictionary<string, string> Texts);
 
     public static void MapContentEndpoints(this WebApplication app)
@@ -36,9 +39,24 @@ public static class Endpoints
                 rows.ToDictionary(r => r.Key, r => r.Value));
         });
 
-        app.MapGet("/categories", async (GovoriDbContext db) =>
-            await db.Categories.Where(c => c.IsActive).OrderBy(c => c.SortOrder)
-                .Select(c => new CategoryDto(c.Name, c.Description, c.Badge)).ToListAsync())
+        // With a genre, counts only that genre's topics and hides categories that have none.
+        app.MapGet("/categories", async (string? genre, GovoriDbContext db) =>
+        {
+            var topics = ActiveTopics(db, genre);
+            return await db.Categories.Where(c => c.IsActive).OrderBy(c => c.SortOrder)
+                .Select(c => new { c.Name, c.Description, c.Badge, Count = topics.Count(t => t.CategoryId == c.Id) })
+                .Where(c => genre == null || c.Count > 0)
+                .Select(c => new CategoryDto(c.Name, c.Description, c.Badge, c.Count))
+                .ToListAsync();
+        }).RequireAuthorization();
+
+        // Ordered as in the topic bank.
+        app.MapGet("/genres", async (GovoriDbContext db) =>
+            await ActiveTopics(db, null).Where(t => t.Genre != "")
+                .GroupBy(t => t.Genre)
+                .OrderBy(g => g.Min(t => t.Id))
+                .Select(g => new GenreDto(g.Key, g.Count()))
+                .ToListAsync())
             .RequireAuthorization();
     }
 
@@ -46,22 +64,32 @@ public static class Endpoints
     {
         var g = app.MapGroup("/topics").RequireAuthorization();
 
-        g.MapGet("/random", async (string? category, int? exclude, ClaimsPrincipal user, GovoriDbContext db) =>
+        g.MapGet("/random", async (string? category, string? genre, int? exclude, ClaimsPrincipal user, GovoriDbContext db) =>
         {
             var userId = user.UserId();
-            var query = db.Topics.Where(t => t.IsActive && t.Category!.IsActive);
+            var query = ActiveTopics(db, genre);
             if (!string.IsNullOrWhiteSpace(category)) query = query.Where(t => t.Category!.Name == category);
             if (exclude is not null) query = query.Where(t => t.Id != exclude);
 
             var used = db.Attempts.Where(a => a.UserId == userId).Select(a => a.TopicId);
             var topic = await query.Where(t => !used.Contains(t.Id)).OrderBy(_ => EF.Functions.Random())
-                            .Select(t => new TopicDto(t.Id, t.Text, t.Category!.Name)).FirstOrDefaultAsync()
+                            .Select(ToDto).FirstOrDefaultAsync()
                         ?? await query.OrderBy(_ => EF.Functions.Random())
-                            .Select(t => new TopicDto(t.Id, t.Text, t.Category!.Name)).FirstOrDefaultAsync();
+                            .Select(ToDto).FirstOrDefaultAsync();
 
             return topic is null ? Results.NotFound() : Results.Ok(topic);
         });
     }
+
+    private static IQueryable<Topic> ActiveTopics(GovoriDbContext db, string? genre)
+    {
+        var query = db.Topics.Where(t => t.IsActive && t.Category!.IsActive);
+        return string.IsNullOrWhiteSpace(genre) ? query : query.Where(t => t.Genre == genre);
+    }
+
+    private static readonly System.Linq.Expressions.Expression<Func<Topic, TopicDto>> ToDto =
+        t => new TopicDto(t.Id, t.Text, t.Category!.Name, t.Genre, t.Technique, t.Hint, t.Difficulty);
+    private static readonly Func<Topic, TopicDto> ToDtoCompiled = ToDto.Compile();
 
     public static void MapAttemptEndpoints(this WebApplication app)
     {
@@ -126,7 +154,7 @@ public static class Endpoints
             if (a is null) return Results.NotFound();
 
             var stored = a.Evaluation is null ? null : JsonSerializer.Deserialize<StoredEvaluation>(a.Evaluation.Json, Json);
-            return Results.Ok(new AttemptDetail(a.Id, new TopicDto(a.Topic!.Id, a.Topic.Text, a.Topic.Category!.Name), a.Status,
+            return Results.Ok(new AttemptDetail(a.Id, ToDtoCompiled(a.Topic!), a.Status,
                 a.DurationSec, a.CreatedAt, a.Transcript, a.FailureReason, stored?.Result, stored?.Metrics,
                 // Audio is voiced on first play, so it is "available" whenever there is text to voice.
                 a.ReviewText, a.ReviewAudioKey != null || (a.ReviewText != null && services.GetService<ISpeechSynthesizer>() != null)));
@@ -246,11 +274,20 @@ public static class Endpoints
             var days = await db.Attempts.Where(a => a.UserId == userId)
                 .Select(a => a.CreatedAt.Date).Distinct().ToListAsync();
 
+            var recentJson = await db.Attempts.Where(a => a.UserId == userId && a.Evaluation != null)
+                .OrderByDescending(a => a.CreatedAt).Select(a => a.Evaluation!.Json).Take(CriteriaWindow * 3).ToListAsync();
+            var rubrics = recentJson.Select(j => JsonSerializer.Deserialize<StoredEvaluation>(j, Json)?.Result.Rubric)
+                .OfType<Rubric>().Take(CriteriaWindow).ToList();
+            var criteria = rubrics.Count == 0 ? null : rubrics.SelectMany(r => r.All())
+                .GroupBy(c => c.Key)
+                .ToDictionary(g => g.Key, g => Math.Round(g.Average(c => c.Criterion.Points), 1));
+
             return new MeDto(
                 await db.Attempts.CountAsync(a => a.UserId == userId),
                 scores.Count == 0 ? null : Math.Round(scores.Average(), 1),
                 scores.Count == 0 ? null : scores.Max(),
-                StreakDays(days));
+                StreakDays(days),
+                criteria);
         });
 
         // Required by App Store guideline 5.1.1(v): users must be able to delete their account in-app.

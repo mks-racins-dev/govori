@@ -116,7 +116,8 @@ public sealed class FakeTranscriber : ITranscriber
     /// <summary>Text returned for the next transcriptions; null means <see cref="DefaultText"/>.</summary>
     public string? Next { get; set; }
 
-    public Task<string> TranscribeAsync(Stream audio, string fileName, CancellationToken ct) => Task.FromResult(Next ?? DefaultText);
+    public Task<Transcription> TranscribeAsync(Stream audio, string fileName, CancellationToken ct) =>
+        Task.FromResult(new Transcription(Next ?? DefaultText, 0.95, ["светофоры"]));
 }
 
 /// <summary>Writes the review as "review#N prev=S recent=[ids]" so tests can see what context it was given.</summary>
@@ -138,8 +139,11 @@ public sealed class FakeEvaluator : ISpeechEvaluator
     {
         Interlocked.Increment(ref _calls);
         if (Interlocked.Decrement(ref _failuresLeft) >= 0) throw new HttpRequestException("AI provider is down (simulated)");
-        var result = new EvaluationResult(Score, new SubScores(8, 9, 7, 8, 8), "Хорошее выступление.",
-            ["Чёткий старт"], ["Меньше «ну»"], ["Начинайте с главной мысли"]);
+        var result = new EvaluationResult(Score, null, "Хорошее выступление.",
+            ["Чёткий старт"], ["Меньше «ну»"], ["Начинайте с главной мысли"],
+            new Rubric(new Criterion(2, "e", ""), new Criterion(2, "e", ""), new Criterion(2, "e", ""),
+                new Criterion(1, "e", "fix"), new Criterion(1, "e", "fix")),
+            new Skeleton("p", "r", null, "c"));
         if (Interlocked.Decrement(ref _missingReviewsLeft) >= 0) return Task.FromResult(new Evaluated(result, null));
 
         var n = Interlocked.Increment(ref _reviews);

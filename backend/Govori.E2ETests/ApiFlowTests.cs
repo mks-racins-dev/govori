@@ -40,6 +40,34 @@ public class ApiFlowTests(ApiFixture api)
     }
 
     [Fact]
+    public async Task Topic_bank_is_browsable_by_genre_and_category()
+    {
+        var http = await api.SignIn();
+
+        var genres = await http.GetFromJsonAsync<JsonElement>("/genres");
+        Assert.Equal(7, genres.GetArrayLength());
+        Assert.Equal("Если бы…", genres[0].GetProperty("name").GetString()); // order of the bank
+        Assert.Equal(29, genres[0].GetProperty("topicCount").GetInt32());
+
+        var all = await http.GetFromJsonAsync<JsonElement>("/categories");
+        Assert.Equal(10, all.GetArrayLength());
+        Assert.Equal(203, all.EnumerateArray().Sum(c => c.GetProperty("topicCount").GetInt32()));
+
+        const string genre = "Продайте предмет";
+        var sell = await http.GetFromJsonAsync<JsonElement>($"/categories?genre={Uri.EscapeDataString(genre)}");
+        Assert.Equal(29, sell.EnumerateArray().Sum(c => c.GetProperty("topicCount").GetInt32()));
+        Assert.All(sell.EnumerateArray(), c => Assert.True(c.GetProperty("topicCount").GetInt32() > 0));
+
+        var category = sell[0].GetProperty("name").GetString()!;
+        var topic = await http.GetFromJsonAsync<JsonElement>(
+            $"/topics/random?genre={Uri.EscapeDataString(genre)}&category={Uri.EscapeDataString(category)}");
+        Assert.Equal(genre, topic.GetProperty("genre").GetString());
+        Assert.Equal(category, topic.GetProperty("category").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(topic.GetProperty("technique").GetString()));
+        Assert.InRange(topic.GetProperty("difficulty").GetInt32(), 1, 3);
+    }
+
+    [Fact]
     public async Task Full_flow_topic_record_evaluate_review_delete()
     {
         var http = await api.SignIn();

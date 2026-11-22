@@ -29,7 +29,12 @@ export const ru = {
     wrongPassword: 'Неверный логин или пароль',
   },
   tabs: { today: 'Сегодня', topics: 'Темы', history: 'История', profile: 'Профиль' },
-  topics: { title: 'Темы', subtitle: 'Выберите категорию — тема внутри будет случайной' },
+  topics: {
+    title: 'Темы',
+    subtitle: 'Выберите жанр и категорию — тема внутри будет случайной',
+    allGenres: 'Все жанры',
+    count: ['{n} тема', '{n} темы', '{n} тем'],
+  },
   home: {
     featured: 'Тема дня',
     featuredLabel: 'Быстрый старт',
@@ -50,6 +55,8 @@ export const ru = {
     reroll: 'Другая тема',
     start: 'Начать запись',
     autoStart: 'Запись начнётся через {s}',
+    technique: 'Приём',
+    difficulty: ['Лёгкая', 'Средняя', 'Сложная'],
   },
   record: {
     title: 'Говорите!',
@@ -85,6 +92,23 @@ export const ru = {
     review: 'Аудиоразбор',
     showReview: 'Показать текст разбора',
     hideReview: 'Скрыть текст разбора',
+    toTen: 'До 10 не хватило',
+    perfect: 'Максимум — все пять критериев выполнены',
+    criteria: {
+      thought: 'Главная мысль',
+      support: 'Довод и пример',
+      conclusion: 'Вывод',
+      coherence: 'Цельность',
+      delivery: 'Подача',
+    },
+    skeleton: 'Скелет речи',
+    skeletonSteps: { point: 'Тезис', reason: 'Причина', example: 'Пример', conclusion: 'Вывод' },
+    missing: 'нет',
+    worked: 'Получилось',
+    fix: 'Исправить',
+    exercise: 'Упражнение',
+    clarity: 'разборчиво',
+    unclear: 'Прозвучали невнятно: {words}',
     subScores: {
       structure: 'Структура',
       relevance: 'По теме',
@@ -113,6 +137,8 @@ export const ru = {
     signOut: 'Выйти',
     deleteAccount: 'Удалить аккаунт',
     deleteConfirm: 'Все ваши записи и оценки будут удалены навсегда. Продолжить?',
+    criteria: 'По критериям',
+    criteriaHint: 'Средний балл из 2 за последние выступления',
   },
 };
 

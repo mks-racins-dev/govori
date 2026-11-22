@@ -5,9 +5,9 @@ import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { ArrowIcon } from '@/components/icons';
 import { Card, Screen } from '@/components/ui';
 import { t } from '@/i18n/ru';
-import { api, PRIVACY_URL, SUPPORT_URL } from '@/lib/api';
+import { api, PRIVACY_URL, RubricKey, SUPPORT_URL } from '@/lib/api';
 import { useSession } from '@/lib/session';
-import { colors, spacing, type } from '@/theme';
+import { colors, fonts, spacing, type } from '@/theme';
 
 export default function Profile() {
   const session = useSession();
@@ -54,6 +54,8 @@ export default function Profile() {
         <Text style={[type.body, { color: 'rgba(255,255,255,0.7)' }]}>{t.profile.streak}</Text>
       </Card>
 
+      {d?.criteria && <CriteriaCard criteria={d.criteria} />}
+
       <Card style={{ paddingVertical: spacing(0.5) }}>
         <Row label={t.profile.support} onPress={() => WebBrowser.openBrowserAsync(SUPPORT_URL)} />
         <Row label={t.profile.privacy} onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)} />
@@ -61,6 +63,35 @@ export default function Profile() {
         <Row label={t.profile.deleteAccount} onPress={deleteAccount} danger last />
       </Card>
     </Screen>
+  );
+}
+
+const CRITERIA: RubricKey[] = ['thought', 'support', 'conclusion', 'coherence', 'delivery'];
+
+/** Average points per criterion; the weakest one is highlighted so it's clear what to train. */
+function CriteriaCard({ criteria }: { criteria: Partial<Record<RubricKey, number>> }) {
+  const keys = CRITERIA.filter((k) => criteria[k] != null);
+  const weakest = keys.reduce<RubricKey | null>((w, k) => (w === null || criteria[k]! < criteria[w]! ? k : w), null);
+  return (
+    <Card style={{ gap: spacing(1.5) }}>
+      <View style={{ gap: 2 }}>
+        <Text style={type.overline}>{t.profile.criteria}</Text>
+        <Text style={type.small}>{t.profile.criteriaHint}</Text>
+      </View>
+      {keys.map((k) => {
+        const value = criteria[k]!;
+        const weak = k === weakest && value < 2;
+        return (
+          <View key={k} style={styles.critRow}>
+            <Text style={[type.small, styles.critLabel]}>{t.result.criteria[k]}</Text>
+            <View style={styles.critTrack}>
+              <View style={[styles.critFill, { width: `${(value / 2) * 100}%` }, weak && { backgroundColor: colors.danger }]} />
+            </View>
+            <Text style={styles.critValue}>{value.toLocaleString('ru-RU')}</Text>
+          </View>
+        );
+      })}
+    </Card>
   );
 }
 
@@ -86,6 +117,11 @@ const styles = StyleSheet.create({
   statsCard: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing(3) },
   vline: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', backgroundColor: colors.line },
   streak: { backgroundColor: colors.ink, gap: 2 },
+  critRow: { flexDirection: 'row', alignItems: 'center', gap: spacing(1.5) },
+  critLabel: { width: 112, color: colors.ink },
+  critTrack: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.fill, overflow: 'hidden' },
+  critFill: { height: 4, borderRadius: 2, backgroundColor: colors.ink },
+  critValue: { width: 28, textAlign: 'right', fontFamily: fonts.semibold, color: colors.ink },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing(2) },
   divider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
 });
