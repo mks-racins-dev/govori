@@ -126,8 +126,11 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
 
     private static readonly Dictionary<string, string> Names = new()
     {
-        ["thought"] = "главная мысль", ["support"] = "довод и пример", ["conclusion"] = "вывод",
-        ["coherence"] = "цельность", ["delivery"] = "подача",
+        ["thought"] = "главная мысль",
+        ["support"] = "довод и пример",
+        ["conclusion"] = "вывод",
+        ["coherence"] = "цельность",
+        ["delivery"] = "подача",
     };
 
     /// <param name="metrics">Delivery is scored from these, not by the model.</param>
@@ -210,8 +213,10 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
                     ["type"] = "object",
                     ["properties"] = new JsonObject
                     {
-                        ["point"] = NullableStr(), ["reason"] = NullableStr(),
-                        ["example"] = NullableStr(), ["conclusion"] = NullableStr(),
+                        ["point"] = NullableStr(),
+                        ["reason"] = NullableStr(),
+                        ["example"] = NullableStr(),
+                        ["conclusion"] = NullableStr(),
                     },
                     ["required"] = new JsonArray("point", "reason", "example", "conclusion"),
                     ["additionalProperties"] = false,

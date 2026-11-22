@@ -50,7 +50,9 @@ public static class Endpoints
             return await db.Categories.Where(c => c.IsActive).OrderBy(c => c.SortOrder)
                 .Select(c => new
                 {
-                    c.Name, c.Description, c.Badge,
+                    c.Name,
+                    c.Description,
+                    c.Badge,
                     Count = topics.Count(t => t.CategoryId == c.Id),
                     Hidden = hidden.Contains(c.Id),
                 })
