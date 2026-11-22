@@ -6,13 +6,23 @@ import { Platform } from 'react-native';
 
 import { api } from './api';
 
-/** expo-secure-store has no web implementation; the web build (dev testing only) uses localStorage. */
+/**
+ * expo-secure-store has no web implementation. The web build (dev testing only) keeps the session token in
+ * memory, never in browser storage, so reloading the page signs out; only the device id persists.
+ */
+const webMemory = new Map<string, string>();
 const SecureStore =
   Platform.OS === 'web'
     ? {
-        getItemAsync: async (k: string) => globalThis.localStorage?.getItem(k) ?? null,
-        setItemAsync: async (k: string, v: string) => globalThis.localStorage?.setItem(k, v),
-        deleteItemAsync: async (k: string) => globalThis.localStorage?.removeItem(k),
+        getItemAsync: async (k: string) =>
+          k === DEVICE_KEY ? (globalThis.localStorage?.getItem(k) ?? null) : (webMemory.get(k) ?? null),
+        setItemAsync: async (k: string, v: string) => {
+          if (k === DEVICE_KEY) globalThis.localStorage?.setItem(k, v);
+          else webMemory.set(k, v);
+        },
+        deleteItemAsync: async (k: string) => {
+          webMemory.delete(k);
+        },
       }
     : NativeSecureStore;
 
