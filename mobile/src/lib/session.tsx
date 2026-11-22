@@ -1,9 +1,21 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
-import * as SecureStore from 'expo-secure-store';
+import * as NativeSecureStore from 'expo-secure-store';
 import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 
 import { api } from './api';
+
+/** expo-secure-store has no web implementation; the web build (dev testing only) uses localStorage. */
+const SecureStore =
+  Platform.OS === 'web'
+    ? {
+        getItemAsync: async (k: string) => globalThis.localStorage?.getItem(k) ?? null,
+        setItemAsync: async (k: string, v: string) => globalThis.localStorage?.setItem(k, v),
+        deleteItemAsync: async (k: string) => globalThis.localStorage?.removeItem(k),
+      }
+    : NativeSecureStore;
+
 
 const TOKEN_KEY = 'govori.token';
 const DEVICE_KEY = 'govori.deviceId';
