@@ -6,8 +6,11 @@ namespace Govori.Infrastructure;
 public class MockTranscriber : ITranscriber
 {
     public Task<Transcription> TranscribeAsync(Stream audio, string fileName, CancellationToken ct) =>
-        Task.FromResult(new Transcription("Ну, это тестовая расшифровка. Добавьте ключ OpenAI в настройки бэкенда, " +
-                        "чтобы получать настоящий текст вашей речи. Вот, как бы, и всё.", 0.96, ["расшифровка"]));
+        Task.FromResult(new Transcription(
+            "Ну, это тестовая расшифровка. Добавьте ключ OpenAI в настройки бэкенда, чтобы получать настоящий " +
+            "текст вашей речи. Это очень хорошая тестовая речь, очень хорошая и очень понятная. Она нужна, " +
+            "чтобы проверить очень хороший разбор, очень хорошие подсказки и очень хорошую тренировку словаря. " +
+            "Вот, как бы, и всё. ", 0.96, ["расшифровка"]));
 }
 
 /// <summary>Used when no Anthropic key is configured.</summary>
@@ -29,6 +32,8 @@ public class MockSpeechEvaluator : ISpeechEvaluator
             ["Закончите выводом, а не «вот и всё»."],
             ["За время подготовки придумайте последнюю фразу."],
             rubric,
-            new Skeleton("это тестовая расшифровка", "добавьте ключ OpenAI", null, null)), Review: null));
+            new Skeleton("это тестовая расшифровка", "добавьте ключ OpenAI", null, null),
+            request.Metrics.Vocabulary is { IsLow: true } ? "Подберите вслух 5 замен слову «очень»: крайне, весьма…" : null),
+            Review: null));
     }
 }

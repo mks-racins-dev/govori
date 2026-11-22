@@ -108,6 +108,8 @@ export const ru = {
     fix: 'Исправить',
     exercise: 'Упражнение',
     clarity: 'разборчиво',
+    drill: 'Тренировка словаря',
+    repeats: 'Чаще всего повторялось',
     unclear: 'Прозвучали невнятно: {words}',
     subScores: {
       structure: 'Структура',

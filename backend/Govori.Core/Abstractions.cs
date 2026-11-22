@@ -61,7 +61,7 @@ public static class SettingKeys
 /// <param name="Clarity">See <see cref="Transcription.Clarity"/>. Shown to the user, not scored.</param>
 public record SpeechMetrics(
     int DurationSec, int WordCount, int WordsPerMinute, Dictionary<string, int> FillerWords,
-    double? Clarity = null, List<string>? UnclearWords = null)
+    double? Clarity = null, List<string>? UnclearWords = null, VocabularyStats? Vocabulary = null)
 {
     public int FillerTotal => FillerWords.Values.Sum();
 }
@@ -95,6 +95,7 @@ public record Skeleton(string? Point, string? Reason, string? Example, string? C
 /// <summary>
 /// Feedback follows the Toastmasters pattern: one thing that worked (Strengths), one fix (Improvements),
 /// one exercise (Suggestions). Rubric and Skeleton are null on evaluations made before the rubric.
+/// Drill is a vocabulary exercise, given only when the speech was monotonous.
 /// </summary>
 public record EvaluationResult(
     int Score,
@@ -104,7 +105,8 @@ public record EvaluationResult(
     List<string> Improvements,
     List<string> Suggestions,
     Rubric? Rubric = null,
-    Skeleton? Skeleton = null);
+    Skeleton? Skeleton = null,
+    string? Drill = null);
 
 /// <summary>Scores delivery from measured numbers, so it can't be inflated by the model.</summary>
 public static class Delivery

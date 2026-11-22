@@ -98,6 +98,8 @@
   "result.fix": "Исправить",
   "result.exercise": "Упражнение",
   "result.clarity": "разборчиво",
+  "result.drill": "Тренировка словаря",
+  "result.repeats": "Чаще всего повторялось",
   "result.unclear": "Прозвучали невнятно: {words}",
   "result.subScores.structure": "Структура",
   "result.subScores.relevance": "По теме",

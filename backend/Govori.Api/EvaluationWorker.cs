@@ -91,10 +91,11 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
                 return;
             }
 
-            var metrics = SpeechAnalyzer.Analyze(attempt.Transcript, attempt.DurationSec,
-                SettingDefaults.Lines(await content.GetAsync(SettingKeys.FillersSingle, ct)).ToHashSet(),
+            var singleFillers = SettingDefaults.Lines(await content.GetAsync(SettingKeys.FillersSingle, ct)).ToHashSet();
+            var metrics = SpeechAnalyzer.Analyze(attempt.Transcript, attempt.DurationSec, singleFillers,
                 SettingDefaults.Lines(await content.GetAsync(SettingKeys.FillersPhrases, ct))) with
             {
+                Vocabulary = Vocabulary.Analyze(attempt.Transcript, attempt.Topic!.Text, singleFillers),
                 Clarity = attempt.Clarity,
                 UnclearWords = attempt.UnclearWords?.Split('\n').ToList(),
             };

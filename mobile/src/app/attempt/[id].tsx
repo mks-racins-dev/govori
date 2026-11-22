@@ -141,6 +141,8 @@ export default function AttemptScreen() {
 
       {ev?.rubric && <AdviceCard evaluation={ev} />}
 
+      {!!ev?.drill && <DrillCard drill={ev.drill} repeats={data.metrics?.vocabulary?.repeats ?? []} />}
+
       {ev && <ReviewCard attemptId={data.id} evaluation={ev} reviewText={data.reviewText} hasAudio={data.hasReviewAudio} />}
 
       {!!data.transcript && (
@@ -249,6 +251,30 @@ function AdviceCard({ evaluation }: { evaluation: Evaluation }) {
           <Text style={type.body}>{r.text}</Text>
         </View>
       ))}
+    </Card>
+  );
+}
+
+/** A vocabulary exercise, shown only when the speech was monotonous. */
+function DrillCard({ drill, repeats }: { drill: string; repeats: { word: string; count: number }[] }) {
+  return (
+    <Card style={{ gap: spacing(1.5) }}>
+      <Text style={type.overline}>{t.result.drill}</Text>
+      <Text style={type.body}>{drill}</Text>
+      {repeats.length > 0 && (
+        <View style={{ gap: spacing(1) }}>
+          <Text style={type.small}>{t.result.repeats}</Text>
+          <View style={styles.chips}>
+            {repeats.map((r) => (
+              <View key={r.word} style={styles.chip}>
+                <Text style={styles.chipText}>
+                  {r.word} · {r.count}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
     </Card>
   );
 }
