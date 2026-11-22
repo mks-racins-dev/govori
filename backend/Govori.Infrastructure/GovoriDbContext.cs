@@ -12,6 +12,7 @@ public class GovoriDbContext(DbContextOptions<GovoriDbContext> options) : DbCont
     public DbSet<Evaluation> Evaluations => Set<Evaluation>();
     public DbSet<UiText> UiTexts => Set<UiText>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
+    public DbSet<HiddenCategory> HiddenCategories => Set<HiddenCategory>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -24,5 +25,8 @@ public class GovoriDbContext(DbContextOptions<GovoriDbContext> options) : DbCont
         modelBuilder.Entity<Attempt>().HasIndex(a => new { a.UserId, a.CreatedAt });
         modelBuilder.Entity<UiText>().HasKey(t => new { t.Locale, t.Key });
         modelBuilder.Entity<AppSetting>().HasKey(s => s.Key);
+        modelBuilder.Entity<HiddenCategory>().HasKey(h => new { h.UserId, h.CategoryId });
+        modelBuilder.Entity<HiddenCategory>().HasOne<User>().WithMany().HasForeignKey(h => h.UserId).OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<HiddenCategory>().HasOne<Category>().WithMany().HasForeignKey(h => h.CategoryId).OnDelete(DeleteBehavior.Cascade);
     }
 }

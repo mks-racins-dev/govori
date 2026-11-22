@@ -9,7 +9,8 @@ export const SUPPORT_URL = `${API_URL}/support`;
 
 export type AttemptStatus = 'Recording' | 'Processing' | 'Done' | 'Failed';
 
-export type Category = { name: string; description: string; badge: string | null; topicCount: number };
+/** `hidden`: the user turned this category off; it's left out of lists and random picks. */
+export type Category = { name: string; description: string; badge: string | null; topicCount: number; hidden: boolean };
 
 export type Genre = { name: string; topicCount: number };
 
@@ -165,5 +166,7 @@ export const api = {
   }),
 
   me: () => request<Me>('/me'),
+  setHiddenCategories: (categories: string[]) =>
+    request<void>('/me/hidden-categories', { method: 'PUT', body: JSON.stringify({ categories }) }),
   deleteAccount: () => request<void>('/me', { method: 'DELETE' }),
 };

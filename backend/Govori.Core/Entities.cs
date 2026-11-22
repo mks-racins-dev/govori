@@ -39,6 +39,13 @@ public class Topic
     public bool IsActive { get; set; } = true;
 }
 
+/// <summary>A category the user turned off: its topics are left out of random picks and hidden in lists.</summary>
+public class HiddenCategory
+{
+    public Guid UserId { get; set; }
+    public int CategoryId { get; set; }
+}
+
 /// <summary>A UI string shown in the app, editable without an app release.</summary>
 public class UiText
 {

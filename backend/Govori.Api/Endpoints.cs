@@ -23,7 +23,9 @@ public static class Endpoints
     public record MeDto(int Attempts, double? AverageScore, int? BestScore, int StreakDays, Dictionary<string, double>? Criteria);
     private const int CriteriaWindow = 10;
 
-    public record CategoryDto(string Name, string Description, string? Badge, int TopicCount);
+    /// <param name="Hidden">The user turned this category off.</param>
+    public record CategoryDto(string Name, string Description, string? Badge, int TopicCount, bool Hidden);
+    public record HiddenCategoriesDto(List<string> Categories);
     public record GenreDto(string Name, int TopicCount);
     public record UiTextsDto(string Locale, DateTime UpdatedAt, Dictionary<string, string> Texts);
 
@@ -40,13 +42,20 @@ public static class Endpoints
         });
 
         // With a genre, counts only that genre's topics and hides categories that have none.
-        app.MapGet("/categories", async (string? genre, GovoriDbContext db) =>
+        app.MapGet("/categories", async (string? genre, ClaimsPrincipal user, GovoriDbContext db) =>
         {
+            var userId = user.UserId();
             var topics = ActiveTopics(db, genre);
+            var hidden = db.HiddenCategories.Where(h => h.UserId == userId).Select(h => h.CategoryId);
             return await db.Categories.Where(c => c.IsActive).OrderBy(c => c.SortOrder)
-                .Select(c => new { c.Name, c.Description, c.Badge, Count = topics.Count(t => t.CategoryId == c.Id) })
+                .Select(c => new
+                {
+                    c.Name, c.Description, c.Badge,
+                    Count = topics.Count(t => t.CategoryId == c.Id),
+                    Hidden = hidden.Contains(c.Id),
+                })
                 .Where(c => genre == null || c.Count > 0)
-                .Select(c => new CategoryDto(c.Name, c.Description, c.Badge, c.Count))
+                .Select(c => new CategoryDto(c.Name, c.Description, c.Badge, c.Count, c.Hidden))
                 .ToListAsync();
         }).RequireAuthorization();
 
@@ -69,6 +78,12 @@ public static class Endpoints
             var userId = user.UserId();
             var query = ActiveTopics(db, genre);
             if (!string.IsNullOrWhiteSpace(category)) query = query.Where(t => t.Category!.Name == category);
+            else
+            {
+                // A random pick skips categories the user turned off; picking one explicitly still works.
+                var hidden = db.HiddenCategories.Where(h => h.UserId == userId).Select(h => h.CategoryId);
+                query = query.Where(t => !hidden.Contains(t.CategoryId));
+            }
             if (exclude is not null) query = query.Where(t => t.Id != exclude);
 
             var used = db.Attempts.Where(a => a.UserId == userId).Select(a => a.TopicId);
@@ -288,6 +303,21 @@ public static class Endpoints
                 scores.Count == 0 ? null : scores.Max(),
                 StreakDays(days),
                 criteria);
+        });
+
+        // Replaces the set of categories the user turned off. At least one active category must stay on.
+        g.MapPut("/hidden-categories", async (HiddenCategoriesDto body, ClaimsPrincipal user, GovoriDbContext db) =>
+        {
+            var userId = user.UserId();
+            var names = body.Categories.ToHashSet();
+            var active = await db.Categories.Where(c => c.IsActive).Select(c => new { c.Id, c.Name }).ToListAsync();
+            var ids = active.Where(c => names.Contains(c.Name)).Select(c => c.Id).ToList();
+            if (ids.Count >= active.Count) return Results.BadRequest(new { error = "At least one category must stay on." });
+
+            await db.HiddenCategories.Where(h => h.UserId == userId).ExecuteDeleteAsync();
+            db.HiddenCategories.AddRange(ids.Select(id => new HiddenCategory { UserId = userId, CategoryId = id }));
+            await db.SaveChangesAsync();
+            return Results.NoContent();
         });
 
         // Required by App Store guideline 5.1.1(v): users must be able to delete their account in-app.
