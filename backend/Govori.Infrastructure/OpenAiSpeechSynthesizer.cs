@@ -6,7 +6,7 @@ using Govori.Core;
 namespace Govori.Infrastructure;
 
 public class OpenAiSpeechSynthesizer(
-    HttpClient http, IContentProvider content, string apiKey, string model = "gpt-4o-mini-tts", string voice = "alloy")
+    HttpClient http, IContentProvider content, string apiKey, string model = "gpt-4o-mini-tts", string voice = "nova")
     : ISpeechSynthesizer
 {
     public async Task<byte[]> SynthesizeAsync(string text, CancellationToken ct)
