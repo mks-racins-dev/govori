@@ -73,6 +73,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 builder.Services.AddAuthorization();
 
+// The native app doesn't need CORS. In development the Expo web build runs on another localhost port.
+if (builder.Environment.IsDevelopment())
+    builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
+        .SetIsOriginAllowed(origin => new Uri(origin).IsLoopback)
+        .AllowAnyHeader()
+        .AllowAnyMethod()));
+
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
@@ -84,6 +91,7 @@ using (var scope = app.Services.CreateScope())
         await supabase.EnsureBucketAsync(CancellationToken.None);
 }
 
+if (app.Environment.IsDevelopment()) app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 
