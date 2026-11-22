@@ -73,7 +73,10 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
             if (attempt.Transcript is null)
             {
                 await using var audio = await sp.GetRequiredService<IAudioStorage>().OpenReadAsync(attempt.AudioKey, ct);
-                attempt.Transcript = await sp.GetRequiredService<ITranscriber>().TranscribeAsync(audio, $"{attempt.Id}.m4a", ct);
+                var transcription = await sp.GetRequiredService<ITranscriber>().TranscribeAsync(audio, $"{attempt.Id}.m4a", ct);
+                attempt.Transcript = transcription.Text;
+                attempt.Clarity = transcription.Clarity;
+                attempt.UnclearWords = transcription.UnclearWords is { Count: > 0 } w ? string.Join('\n', w) : null;
                 await db.SaveChangesAsync(ct);
             }
 
@@ -90,7 +93,11 @@ public class EvaluationWorker(IServiceScopeFactory scopes, ILogger<EvaluationWor
 
             var metrics = SpeechAnalyzer.Analyze(attempt.Transcript, attempt.DurationSec,
                 SettingDefaults.Lines(await content.GetAsync(SettingKeys.FillersSingle, ct)).ToHashSet(),
-                SettingDefaults.Lines(await content.GetAsync(SettingKeys.FillersPhrases, ct)));
+                SettingDefaults.Lines(await content.GetAsync(SettingKeys.FillersPhrases, ct))) with
+            {
+                Clarity = attempt.Clarity,
+                UnclearWords = attempt.UnclearWords?.Split('\n').ToList(),
+            };
 
             // The previous result and recent reviews let the spoken review talk about progress without repeating itself.
             var earlier = db.Attempts.Where(a => a.UserId == attempt.UserId && a.Id != attempt.Id && a.CreatedAt < attempt.CreatedAt);

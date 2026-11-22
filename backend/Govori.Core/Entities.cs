@@ -25,7 +25,17 @@ public class Topic
     public string Text { get; set; } = "";
     public int CategoryId { get; set; }
     public Category? Category { get; set; }
+    /// <summary>1 easy, 2 medium, 3 hard. Also sets the prep time.</summary>
     public int Difficulty { get; set; }
+
+    /// <summary>Format of the task, e.g. "Если бы…" or "Продайте предмет". Empty for legacy topics.</summary>
+    public string Genre { get; set; } = "";
+
+    /// <summary>A speaking technique suggested for this topic, e.g. "Правило трёх". Not scored.</summary>
+    public string Technique { get; set; } = "";
+
+    /// <summary>A one-line hint shown during preparation.</summary>
+    public string Hint { get; set; } = "";
     public bool IsActive { get; set; } = true;
 }
 
@@ -56,6 +66,12 @@ public class Attempt
     public AttemptStatus Status { get; set; }
     public string? Transcript { get; set; }
     public string? FailureReason { get; set; }
+
+    /// <summary>Share of words the transcriber heard confidently (0–1); null when it gave no confidence data.</summary>
+    public double? Clarity { get; set; }
+
+    /// <summary>Words heard least confidently, newline-separated.</summary>
+    public string? UnclearWords { get; set; }
 
     /// <summary>Storage key of the spoken AI review; null when it was not generated.</summary>
     public string? ReviewAudioKey { get; set; }

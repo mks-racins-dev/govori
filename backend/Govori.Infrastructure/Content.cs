@@ -32,14 +32,22 @@ public static class ContentSeeder
         }
         await db.SaveChangesAsync();
 
-        var existingTopics = (await db.Topics.Select(t => new { t.CategoryId, t.Text }).ToListAsync())
-            .Select(t => (t.CategoryId, t.Text)).ToHashSet();
-        foreach (var (categoryName, texts) in TopicSeed.ByCategory)
+        // A topic from the old bank that is also in the new one gets the new fields once (while its genre is empty);
+        // after that, edits made in the database win.
+        var existingTopics = await db.Topics.ToDictionaryAsync(t => (t.CategoryId, t.Text));
+        foreach (var item in TopicSeed.Topics)
         {
-            var category = categories[categoryName];
-            for (var i = 0; i < texts.Length; i++)
-                if (!existingTopics.Contains((category.Id, texts[i])))
-                    db.Topics.Add(new Topic { Text = texts[i], CategoryId = category.Id, Difficulty = 1 + i % 3 });
+            var categoryId = categories[item.Category].Id;
+            if (!existingTopics.TryGetValue((categoryId, item.Text), out var topic))
+            {
+                topic = new Topic { Text = item.Text, CategoryId = categoryId };
+                db.Topics.Add(topic);
+                existingTopics[(categoryId, item.Text)] = topic;
+            }
+            else if (topic.Genre != "") continue;
+
+            (topic.Genre, topic.Technique, topic.Hint, topic.Difficulty, topic.IsActive) =
+                (item.Genre, item.Technique, item.Hint, item.Difficulty, true);
         }
 
         var settingKeys = await db.AppSettings.Select(s => s.Key).ToHashSetAsync();

@@ -57,43 +57,47 @@ public class SpeechAnalyzerTests
 
 public class ClaudeEvaluatorTests
 {
-    [Fact]
-    public void Parses_structured_output_and_clamps_scores()
+    private static readonly SpeechMetrics GoodDelivery = new(60, 130, 130, []);
+
+    private static string Wrap(string json) => new System.Text.Json.Nodes.JsonObject
     {
-        const string json = """
-            {"score":12,"subScores":{"structure":0,"relevance":8,"vocabulary":7,"fluency":6,"pace":5},
-             "summary":"Хорошо","strengths":["a"],"improvements":["b"],"suggestions":["c"]}
-            """;
-        var response = new System.Text.Json.Nodes.JsonObject
-        {
-            ["stop_reason"] = "end_turn",
-            ["content"] = new System.Text.Json.Nodes.JsonArray(
-                new System.Text.Json.Nodes.JsonObject { ["type"] = "thinking", ["thinking"] = "" },
-                new System.Text.Json.Nodes.JsonObject { ["type"] = "text", ["text"] = json }),
-        }.ToJsonString();
+        ["stop_reason"] = "end_turn",
+        ["content"] = new System.Text.Json.Nodes.JsonArray(
+            new System.Text.Json.Nodes.JsonObject { ["type"] = "thinking", ["thinking"] = "" },
+            new System.Text.Json.Nodes.JsonObject { ["type"] = "text", ["text"] = json }),
+    }.ToJsonString();
 
-        var (r, review) = ClaudeEvaluator.ParseResponse(response);
+    private const string Reply = """
+        {"thought":{"points":5,"evidence":"«мысль»","toMax":"лишнее"},
+         "support":{"points":1,"evidence":"общий пример","toMax":"свой случай"},
+         "conclusion":{"points":-1,"evidence":"обрыв","toMax":"итог"},
+         "coherence":{"points":2,"evidence":"по теме","toMax":""},
+         "skeleton":{"point":"мысль","reason":null,"example":"  ","conclusion":null},
+         "summary":"Хорошо","strength":"a","fix":"b","exercise":"c","review":"  Привет! Неплохо, 6 из 10. "}
+        """;
 
-        Assert.Equal(10, r.Score);
-        Assert.Equal(1, r.SubScores.Structure);
-        Assert.Equal("Хорошо", r.Summary);
-        Assert.Null(review);
+    [Fact]
+    public void Score_is_the_sum_of_clamped_criteria_plus_measured_delivery()
+    {
+        var (r, review) = ClaudeEvaluator.ParseResponse(Wrap(Reply), GoodDelivery);
+
+        Assert.NotNull(r.Rubric);
+        Assert.Equal(2, r.Rubric.Thought.Points);
+        Assert.Equal("", r.Rubric.Thought.ToMax); // full marks need no advice
+        Assert.Equal(0, r.Rubric.Conclusion.Points);
+        Assert.Equal(2, r.Rubric.Delivery.Points);
+        Assert.Equal(2 + 1 + 0 + 2 + 2, r.Score);
+        Assert.Equal(["a"], r.Strengths);
+        Assert.Equal("Привет! Неплохо, 6 из 10.", review);
     }
 
     [Fact]
-    public void Parses_and_trims_the_review()
+    public void Blank_skeleton_steps_become_null()
     {
-        const string json = """
-            {"score":7,"subScores":{"structure":7,"relevance":7,"vocabulary":7,"fluency":7,"pace":7},
-             "summary":"s","strengths":[],"improvements":[],"suggestions":[],"review":"  Привет! Неплохо, 7 из 10. "}
-            """;
-        var response = new System.Text.Json.Nodes.JsonObject
-        {
-            ["stop_reason"] = "end_turn",
-            ["content"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["type"] = "text", ["text"] = json }),
-        }.ToJsonString();
-
-        Assert.Equal("Привет! Неплохо, 7 из 10.", ClaudeEvaluator.ParseResponse(response).Review);
+        var sk = ClaudeEvaluator.ParseResponse(Wrap(Reply), GoodDelivery).Result.Skeleton!;
+        Assert.Equal("мысль", sk.Point);
+        Assert.Null(sk.Example);
+        Assert.Null(sk.Reason);
     }
 
     [Theory]
@@ -101,7 +105,7 @@ public class ClaudeEvaluatorTests
     [InlineData("""{"stop_reason":"max_tokens","content":[{"type":"text","text":"{"}]}""")]
     [InlineData("""{"stop_reason":"end_turn","content":[]}""")]
     public void Rejects_unfinished_or_empty_responses(string json) =>
-        Assert.Throws<InvalidOperationException>(() => ClaudeEvaluator.ParseResponse(json));
+        Assert.Throws<InvalidOperationException>(() => ClaudeEvaluator.ParseResponse(json, GoodDelivery));
 }
 
 public class ReviewScriptTests
@@ -126,6 +130,7 @@ public class ReviewScriptTests
             Eval(6), ["Привет! Было здорово."]));
 
         Assert.Contains("Прошлое выступление: 6/10 (неплохо)", msg, StringComparison.Ordinal);
+        Assert.Contains("Подача (посчитана приложением): 2/2", msg, StringComparison.Ordinal);
         Assert.Contains("Привет! Было здорово.", msg, StringComparison.Ordinal);
     }
 
@@ -183,4 +188,38 @@ public class KeyedLockTests
         held.Dispose();
         Assert.Equal(0, locks.Count);
     }
+}
+
+public class DeliveryTests
+{
+    [Theory]
+    [InlineData(60, 130, 1, 2)]  // all within norms
+    [InlineData(60, 90, 1, 1)]   // too slow
+    [InlineData(60, 90, 5, 0)]   // too slow and many fillers
+    [InlineData(30, 130, 0, 1)]  // too short
+    public void Points_drop_with_each_missed_norm(int seconds, int wpm, int fillers, int expected)
+    {
+        var m = new SpeechMetrics(seconds, wpm * seconds / 60, wpm, fillers == 0 ? [] : new() { ["ну"] = fillers });
+        var c = Delivery.Score(m);
+        Assert.Equal(expected, c.Points);
+        Assert.Equal(expected == 2, c.ToMax == "");
+    }
+}
+
+public class ClarityTests
+{
+    [Fact]
+    public void Joins_tokens_into_words_and_flags_the_least_confident()
+    {
+        var tokens = new (string, double)[]
+        {
+            (" Пон", -0.01), ("едельник", -0.02), (" —", -0.01), (" луч", -2.5), ("ший", -0.1), (" день", -0.05), (".", 0),
+        };
+        var (clarity, unclear) = Clarity.FromTokens(tokens);
+        Assert.Equal(0.67, clarity);
+        Assert.Equal(["лучший"], unclear);
+    }
+
+    [Fact]
+    public void No_words_means_unknown_clarity() => Assert.Null(Clarity.FromTokens([]).Clarity);
 }

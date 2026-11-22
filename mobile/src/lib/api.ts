@@ -1,4 +1,5 @@
 import { File } from 'expo-file-system';
+import { Platform } from 'react-native';
 
 import { getToken } from './session';
 
@@ -8,9 +9,20 @@ export const SUPPORT_URL = `${API_URL}/support`;
 
 export type AttemptStatus = 'Recording' | 'Processing' | 'Done' | 'Failed';
 
-export type Category = { name: string; description: string; badge: string | null };
+export type Category = { name: string; description: string; badge: string | null; topicCount: number };
 
-export type Topic = { id: number; text: string; category: string };
+export type Genre = { name: string; topicCount: number };
+
+/** Legacy topics have an empty genre, technique and hint. Difficulty: 1 easy, 2 medium, 3 hard. */
+export type Topic = {
+  id: number;
+  text: string;
+  category: string;
+  genre: string;
+  technique: string;
+  hint: string;
+  difficulty: number;
+};
 
 export type AttemptSummary = {
   id: string;
@@ -30,9 +42,21 @@ export type SubScores = {
   pace: number;
 };
 
+/** One rubric criterion: 0–2 points, the evidence, and what would have earned 2 (empty at 2). */
+export type Criterion = { points: number; evidence: string; toMax: string };
+
+export type RubricKey = 'thought' | 'support' | 'conclusion' | 'coherence' | 'delivery';
+export type Rubric = Record<RubricKey, Criterion>;
+
+/** The speech on the PREP steps: a short quote per step, null when the step is missing. */
+export type Skeleton = { point: string | null; reason: string | null; example: string | null; conclusion: string | null };
+
+/** `rubric` and `skeleton` are null on evaluations made before the rubric; those have `subScores` instead. */
 export type Evaluation = {
   score: number;
-  subScores: SubScores;
+  subScores: SubScores | null;
+  rubric: Rubric | null;
+  skeleton: Skeleton | null;
   summary: string;
   strengths: string[];
   improvements: string[];
@@ -44,6 +68,9 @@ export type Metrics = {
   wordCount: number;
   wordsPerMinute: number;
   fillerWords: Record<string, number>;
+  /** Share of words heard clearly (0–1); null when unknown. */
+  clarity?: number | null;
+  unclearWords?: string[] | null;
 };
 
 export type AttemptDetail = {
@@ -60,7 +87,14 @@ export type AttemptDetail = {
   hasReviewAudio: boolean;
 };
 
-export type Me = { attempts: number; averageScore: number | null; bestScore: number | null; streakDays: number };
+export type Me = {
+  attempts: number;
+  averageScore: number | null;
+  bestScore: number | null;
+  streakDays: number;
+  /** Average points (0–2) per criterion over recent attempts; null before any rubric-scored attempt. */
+  criteria: Partial<Record<RubricKey, number>> | null;
+};
 
 export class ApiError extends Error {
   constructor(public status: number, detail?: string) {
@@ -91,21 +125,29 @@ export const api = {
   appleLogin: (identityToken: string) =>
     request<{ token: string }>('/auth/apple', { method: 'POST', body: JSON.stringify({ identityToken }) }),
 
-  categories: () => request<Category[]>('/categories'),
+  categories: (genre?: string) => request<Category[]>(genre ? `/categories?genre=${encodeURIComponent(genre)}` : '/categories'),
+  genres: () => request<Genre[]>('/genres'),
 
-  randomTopic: (exclude?: number, category?: string) => {
+  randomTopic: (exclude?: number, category?: string, genre?: string) => {
     const q = new URLSearchParams();
     if (exclude) q.set('exclude', String(exclude));
     if (category) q.set('category', category);
+    if (genre) q.set('genre', genre);
     return request<Topic>(`/topics/random?${q}`);
   },
 
-  uploadAttempt: (topicId: number, durationSec: number, audioUri: string) => {
+  uploadAttempt: async (topicId: number, durationSec: number, audioUri: string) => {
     const form = new FormData();
     form.append('topicId', String(topicId));
     form.append('durationSec', String(durationSec));
-    // Expo's fetch needs a real File object, not React Native's { uri, name, type } descriptor.
-    form.append('audio', new File(audioUri));
+    if (Platform.OS === 'web') {
+      // On web the recorder returns a blob: URL; expo-file-system is unavailable there.
+      const blob = await (await fetch(audioUri)).blob();
+      form.append('audio', blob, 'recording.webm');
+    } else {
+      // Expo's fetch needs a real File object, not React Native's { uri, name, type } descriptor.
+      form.append('audio', new File(audioUri));
+    }
     return request<{ id: string }>('/attempts', { method: 'POST', body: form });
   },
 

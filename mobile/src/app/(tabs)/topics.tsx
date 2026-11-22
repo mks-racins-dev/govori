@@ -1,18 +1,22 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { DiscArt } from '@/components/icons';
-import { Badge, Screen } from '@/components/ui';
-import { t } from '@/i18n/ru';
-import { useCategories } from '@/lib/use-categories';
+import { Badge, Pill, Screen } from '@/components/ui';
+import { fmt, t } from '@/i18n/ru';
+import { plural } from '@/lib/format';
+import { useCategories, useGenres } from '@/lib/use-categories';
 import { colors, radius, shadow, spacing, type } from '@/theme';
 
 export default function Topics() {
-  const categories = useCategories();
+  const [genre, setGenre] = useState<string | undefined>();
+  const genres = useGenres();
+  const categories = useCategories(genre);
   const start = (category: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push({ pathname: '/topic', params: { category } });
+    router.push({ pathname: '/topic', params: genre ? { category, genre } : { category } });
   };
 
   return (
@@ -21,6 +25,19 @@ export default function Topics() {
         <Text style={type.display}>{t.topics.title}</Text>
         <Text style={type.small}>{t.topics.subtitle}</Text>
       </View>
+
+      {genres.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.genres}
+          contentContainerStyle={styles.genresContent}>
+          <Pill label={t.topics.allGenres} active={!genre} onPress={() => setGenre(undefined)} />
+          {genres.map((g) => (
+            <Pill key={g.name} label={g.name} active={genre === g.name} onPress={() => setGenre(g.name)} />
+          ))}
+        </ScrollView>
+      )}
 
       <View style={styles.grid}>
         {categories.map((c) => (
@@ -37,9 +54,7 @@ export default function Topics() {
               )}
             </View>
             <Text style={[type.heading, styles.center, { marginTop: spacing(2.5) }]}>{c.name}</Text>
-            <Text style={[type.small, styles.center, { color: colors.faint }]} numberOfLines={3}>
-              {c.description}
-            </Text>
+            <Text style={[type.small, styles.center, { color: colors.faint }]}>{fmt(plural(c.topicCount, t.topics.count), { n: c.topicCount })}</Text>
           </Pressable>
         ))}
       </View>
@@ -48,6 +63,9 @@ export default function Topics() {
 }
 
 const styles = StyleSheet.create({
+  // Bleeds to the screen edges so chips scroll under them, while the first chip lines up with the content.
+  genres: { marginHorizontal: -spacing(2.5), flexGrow: 0 },
+  genresContent: { gap: spacing(1), paddingHorizontal: spacing(2.5) },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: spacing(1.5) },
   tile: {
     width: '48.5%',

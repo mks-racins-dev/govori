@@ -6,7 +6,7 @@ namespace Govori.Infrastructure;
 
 public class OpenAiTranscriber(HttpClient http, IContentProvider content, string apiKey, string model = "gpt-4o-mini-transcribe") : ITranscriber
 {
-    public async Task<string> TranscribeAsync(Stream audio, string fileName, CancellationToken ct)
+    public async Task<Transcription> TranscribeAsync(Stream audio, string fileName, CancellationToken ct)
     {
         using var form = new MultipartFormDataContent();
         var file = new StreamContent(audio);
@@ -15,6 +15,8 @@ public class OpenAiTranscriber(HttpClient http, IContentProvider content, string
         form.Add(new StringContent(model), "model");
         form.Add(new StringContent("ru"), "language");
         form.Add(new StringContent("json"), "response_format");
+        // Token confidences, used as a rough clarity measure. Free: same request, same price.
+        form.Add(new StringContent("logprobs"), "include[]");
         // Ask the model to keep hesitations so filler detection works.
         form.Add(new StringContent(await content.GetAsync(SettingKeys.TranscriptionPrompt, ct)), "prompt");
 
@@ -27,6 +29,14 @@ public class OpenAiTranscriber(HttpClient http, IContentProvider content, string
             throw new InvalidOperationException($"Transcription failed ({(int)res.StatusCode}): {body}");
 
         using var doc = JsonDocument.Parse(body);
-        return doc.RootElement.GetProperty("text").GetString() ?? "";
+        var text = doc.RootElement.GetProperty("text").GetString() ?? "";
+        if (!doc.RootElement.TryGetProperty("logprobs", out var lp) || lp.ValueKind != JsonValueKind.Array)
+            return new Transcription(text);
+
+        var tokens = lp.EnumerateArray()
+            .Select(t => (t.GetProperty("token").GetString() ?? "", t.GetProperty("logprob").GetDouble()))
+            .ToList();
+        var (clarity, unclear) = Clarity.FromTokens(tokens);
+        return new Transcription(text, clarity, unclear);
     }
 }

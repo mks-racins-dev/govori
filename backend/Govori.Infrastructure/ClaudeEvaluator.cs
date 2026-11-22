@@ -17,8 +17,10 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
     /// <summary>Joins the two editable prompts: the review rules apply only to the "review" field.</summary>
     public const string ReviewSectionHeader =
         "# Поле review — голосовое сообщение\n\n" +
-        "Поля score, subScores, summary, strengths, improvements и suggestions заполняй по правилам выше. " +
+        "Остальные поля заполняй по правилам выше. " +
         "Поле review — отдельный текст для озвучки, написанный после оценки и опирающийся на неё. " +
+        "Итоговая оценка из 10 — это сумма твоих баллов за четыре критерия и балла за подачу из данных; " +
+        "в review называй именно её. " +
         "К нему относятся только правила ниже, в том числе обращение на «ты».\n\n";
 
     public async Task<Evaluated> EvaluateAsync(EvaluationRequest request, CancellationToken ct)
@@ -62,7 +64,7 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
                 if (!res.IsSuccessStatusCode)
                     throw new InvalidOperationException($"Claude request failed ({(int)res.StatusCode}): {text}");
 
-                return ParseResponse(text);
+                return ParseResponse(text, request.Metrics);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -85,6 +87,8 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
         sb.AppendLine(inv, $"Длительность: {m.DurationSec} с");
         sb.AppendLine(inv, $"Слов: {m.WordCount}, темп: {m.WordsPerMinute} слов/мин");
         sb.AppendLine(inv, $"Слова-паразиты: {fillers}");
+        var delivery = Delivery.Score(m);
+        sb.AppendLine(inv, $"Подача (посчитана приложением): {delivery.Points}/2");
         sb.AppendLine();
         sb.AppendLine("Расшифровка:");
         sb.AppendLine(string.IsNullOrWhiteSpace(r.Transcript) ? "(пусто)" : r.Transcript);
@@ -93,7 +97,8 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
         if (r.Previous is { } p)
         {
             sb.AppendLine(inv, $"Прошлое выступление: {p.Score}/10 ({ReviewScript.ScoreTier(p.Score).ToLowerInvariant()})");
-            sb.AppendLine(inv, $"Прошлые подоценки: {SubScores(p.SubScores)}");
+            if (p.Rubric is { } pr)
+                sb.AppendLine(inv, $"Прошлые баллы: {string.Join(", ", pr.All().Select(c => $"{Names[c.Key]} {c.Criterion.Points}/2"))}");
             sb.AppendLine(inv, $"В прошлый раз советовали улучшить: {string.Join("; ", p.Improvements)}");
         }
         else
@@ -110,7 +115,14 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
         return sb.ToString();
     }
 
-    public static Evaluated ParseResponse(string responseJson)
+    private static readonly Dictionary<string, string> Names = new()
+    {
+        ["thought"] = "главная мысль", ["support"] = "довод и пример", ["conclusion"] = "вывод",
+        ["coherence"] = "цельность", ["delivery"] = "подача",
+    };
+
+    /// <param name="metrics">Delivery is scored from these, not by the model.</param>
+    public static Evaluated ParseResponse(string responseJson, SpeechMetrics metrics)
     {
         var root = JsonNode.Parse(responseJson)!;
         var stopReason = root["stop_reason"]?.GetValue<string>();
@@ -123,63 +135,83 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
 
         var reply = JsonSerializer.Deserialize<Reply>(text, Json)
             ?? throw new InvalidOperationException("Empty evaluation.");
-
-        if (reply.SubScores is null || reply.Strengths is null || reply.Improvements is null || reply.Suggestions is null)
+        if (reply.Thought is null || reply.Support is null || reply.Conclusion is null || reply.Coherence is null)
             throw new InvalidOperationException("Evaluation is missing required fields.");
 
-        static int Clamp(int v) => Math.Clamp(v, 1, 10);
-        var s = reply.SubScores;
+        static Criterion Fix(ReplyCriterion c)
+        {
+            var points = Math.Clamp(c.Points, 0, 2);
+            return new Criterion(points, c.Evidence?.Trim() ?? "", points == 2 ? "" : c.ToMax?.Trim() ?? "");
+        }
+
+        var rubric = new Rubric(Fix(reply.Thought), Fix(reply.Support), Fix(reply.Conclusion), Fix(reply.Coherence),
+            Delivery.Score(metrics));
+        static List<string> One(string? s) => string.IsNullOrWhiteSpace(s) ? [] : [s.Trim()];
+        static string? Quote(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+        var sk = reply.Skeleton;
+
         var result = new EvaluationResult(
-            Clamp(reply.Score),
-            new SubScores(Clamp(s.Structure), Clamp(s.Relevance), Clamp(s.Vocabulary), Clamp(s.Fluency), Clamp(s.Pace)),
-            reply.Summary ?? "", reply.Strengths, reply.Improvements, reply.Suggestions);
+            rubric.Total, null, reply.Summary?.Trim() ?? "",
+            One(reply.Strength), One(reply.Fix), One(reply.Exercise),
+            rubric,
+            new Skeleton(Quote(sk?.Point), Quote(sk?.Reason), Quote(sk?.Example), Quote(sk?.Conclusion)));
         return new Evaluated(result, string.IsNullOrWhiteSpace(reply.Review) ? null : reply.Review.Trim());
     }
 
+    private sealed record ReplyCriterion(int Points, string? Evidence, string? ToMax);
+    private sealed record ReplySkeleton(string? Point, string? Reason, string? Example, string? Conclusion);
     private sealed record Reply(
-        int Score, SubScores? SubScores, string? Summary,
-        List<string>? Strengths, List<string>? Improvements, List<string>? Suggestions, string? Review);
-
-    private static string SubScores(SubScores s) =>
-        $"структура {s.Structure}, по теме {s.Relevance}, словарь {s.Vocabulary}, плавность {s.Fluency}, темп {s.Pace}";
+        ReplyCriterion? Thought, ReplyCriterion? Support, ReplyCriterion? Conclusion, ReplyCriterion? Coherence,
+        ReplySkeleton? Skeleton, string? Summary, string? Strength, string? Fix, string? Exercise, string? Review);
 
     private static JsonObject Schema()
     {
-        // Range 1–10 is stated in the prompt and enforced by Clamp in ParseResponse.
-        static JsonObject Score() => new() { ["type"] = "integer" };
-        static JsonObject List() => new() { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } };
+        static JsonObject Str(string? description = null) => description is null
+            ? new() { ["type"] = "string" }
+            : new() { ["type"] = "string", ["description"] = description };
+        static JsonObject NullableStr() => new() { ["type"] = new JsonArray("string", "null") };
+        // The 0–2 range is stated in the prompt and enforced by Math.Clamp in ParseResponse.
+        static JsonObject Criterion() => new()
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject
+            {
+                ["points"] = new JsonObject { ["type"] = "integer" },
+                ["evidence"] = Str(),
+                ["toMax"] = Str(),
+            },
+            ["required"] = new JsonArray("points", "evidence", "toMax"),
+            ["additionalProperties"] = false,
+        };
 
         return new JsonObject
         {
             ["type"] = "object",
             ["properties"] = new JsonObject
             {
-                ["score"] = Score(),
-                ["subScores"] = new JsonObject
+                ["thought"] = Criterion(),
+                ["support"] = Criterion(),
+                ["conclusion"] = Criterion(),
+                ["coherence"] = Criterion(),
+                ["skeleton"] = new JsonObject
                 {
                     ["type"] = "object",
                     ["properties"] = new JsonObject
                     {
-                        ["structure"] = Score(),
-                        ["relevance"] = Score(),
-                        ["vocabulary"] = Score(),
-                        ["fluency"] = Score(),
-                        ["pace"] = Score(),
+                        ["point"] = NullableStr(), ["reason"] = NullableStr(),
+                        ["example"] = NullableStr(), ["conclusion"] = NullableStr(),
                     },
-                    ["required"] = new JsonArray("structure", "relevance", "vocabulary", "fluency", "pace"),
+                    ["required"] = new JsonArray("point", "reason", "example", "conclusion"),
                     ["additionalProperties"] = false,
                 },
-                ["summary"] = new JsonObject { ["type"] = "string", ["description"] = "1–2 предложения общего впечатления" },
-                ["strengths"] = List(),
-                ["improvements"] = List(),
-                ["suggestions"] = List(),
-                ["review"] = new JsonObject
-                {
-                    ["type"] = "string",
-                    ["description"] = "Голосовое сообщение тренера по правилам раздела «Поле review»",
-                },
+                ["summary"] = Str("Одно предложение общего впечатления"),
+                ["strength"] = Str(),
+                ["fix"] = Str(),
+                ["exercise"] = Str(),
+                ["review"] = Str("Голосовое сообщение тренера по правилам раздела «Поле review»"),
             },
-            ["required"] = new JsonArray("score", "subScores", "summary", "strengths", "improvements", "suggestions", "review"),
+            ["required"] = new JsonArray("thought", "support", "conclusion", "coherence", "skeleton",
+                "summary", "strength", "fix", "exercise", "review"),
             ["additionalProperties"] = false,
         };
     }
