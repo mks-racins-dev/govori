@@ -7,7 +7,7 @@ import { AttemptPlayer, ReviewPlayer } from '@/components/audio-player';
 import { ChevronIcon, TrashIcon } from '@/components/icons';
 import { Badge, Button, Card, Centered, Header, Muted, Screen } from '@/components/ui';
 import { fmt, t } from '@/i18n/ru';
-import { api, Criterion, Evaluation, Rubric, RubricKey, Skeleton, SubScores } from '@/lib/api';
+import { api, Criterion, Evaluation, Metrics, RubricKey, SubScores } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { colors, fonts, radius, spacing, type } from '@/theme';
 
@@ -42,11 +42,13 @@ export default function AttemptScreen() {
     ]);
 
   const data = attempt.data;
+  // No delete while the report is being made: the worker is still writing it.
   const header = (
     <Header
       title={t.result.title}
       right={
-        data && (
+        data &&
+        data.status !== 'Processing' && (
           <Pressable hitSlop={12} onPress={remove}>
             <TrashIcon size={20} color={colors.muted} />
           </Pressable>
@@ -79,7 +81,6 @@ export default function AttemptScreen() {
   }
 
   const ev = data.evaluation;
-  const fillerTotal = data.metrics ? Object.values(data.metrics.fillerWords).reduce((a, b) => a + b, 0) : 0;
 
   return (
     <Screen>
@@ -98,9 +99,7 @@ export default function AttemptScreen() {
         {ev && <Text style={[type.body, styles.summary]}>{ev.summary}</Text>}
       </Card>
 
-      <Card>
-        <AttemptPlayer attemptId={data.id} fallbackDuration={data.durationSec} />
-      </Card>
+      {ev && <ReviewCard attemptId={data.id} evaluation={ev} reviewText={data.reviewText} hasAudio={data.hasReviewAudio} />}
 
       {data.status === 'Failed' && (
         <Card style={{ gap: spacing(2) }}>
@@ -111,11 +110,18 @@ export default function AttemptScreen() {
         </Card>
       )}
 
-      {ev?.rubric && <ToTenCard rubric={ev.rubric} />}
-
       {ev?.rubric ? (
-        <Card style={{ gap: spacing(2) }}>
-          <RubricRows rubric={ev.rubric} />
+        <Card>
+          <Text style={type.overline}>{t.result.criteriaTitle}</Text>
+          {RUBRIC_KEYS.map((key, i) => (
+            <CriterionRow
+              key={key}
+              first={i === 0}
+              label={t.result.criteria[key]}
+              criterion={ev.rubric![key]}
+              delivery={key === 'delivery' ? data.metrics : null}
+            />
+          ))}
         </Card>
       ) : (
         ev?.subScores && (
@@ -125,30 +131,17 @@ export default function AttemptScreen() {
         )
       )}
 
-      {data.metrics && (
-        <View style={styles.stats}>
-          <Stat value={data.metrics.wordsPerMinute} label={t.result.wpm} />
-          <Stat value={fillerTotal} label={t.result.fillers.toLowerCase()} />
-          {data.metrics.clarity != null ? (
-            <Stat value={`${Math.round(data.metrics.clarity * 100)}%`} label={t.result.clarity} />
-          ) : (
-            <Stat value={data.metrics.wordCount} label={t.result.words} />
-          )}
-        </View>
-      )}
+      {ev && <PracticeCard evaluation={ev} repeats={data.metrics?.vocabulary?.repeats ?? []} />}
 
-      {ev?.skeleton && <SkeletonCard skeleton={ev.skeleton} />}
-
-      {ev?.rubric && <AdviceCard evaluation={ev} />}
-
-      {!!ev?.drill && <DrillCard drill={ev.drill} repeats={data.metrics?.vocabulary?.repeats ?? []} />}
-
-      {ev && <ReviewCard attemptId={data.id} evaluation={ev} reviewText={data.reviewText} hasAudio={data.hasReviewAudio} />}
-
-      {!!data.transcript && (
+      {(!!data.transcript || data.status !== 'Failed') && (
         <Card style={{ gap: spacing(1.5) }}>
-          <Text style={type.overline}>{t.result.transcript}</Text>
-          <Transcript text={data.transcript} fillers={Object.keys(data.metrics?.fillerWords ?? {})} />
+          <Text style={type.overline}>{t.result.transcriptAndRecording}</Text>
+          <View style={styles.recording}>
+            <AttemptPlayer attemptId={data.id} fallbackDuration={data.durationSec} />
+          </View>
+          {!!data.transcript && (
+            <Transcript text={data.transcript} fillers={Object.keys(data.metrics?.fillerWords ?? {})} />
+          )}
           {data.metrics && <FillerChips fillers={data.metrics.fillerWords} />}
           {!!data.metrics?.unclearWords?.length && (
             <Muted>{fmt(t.result.unclear, { words: data.metrics.unclearWords.join(', ') })}</Muted>
@@ -163,42 +156,90 @@ export default function AttemptScreen() {
 
 const RUBRIC_KEYS: RubricKey[] = ['thought', 'support', 'conclusion', 'coherence', 'delivery'];
 
-/** What separates this score from 10, biggest gains first. */
-function ToTenCard({ rubric }: { rubric: Rubric }) {
-  const gaps = RUBRIC_KEYS.map((key) => ({ key, gain: 2 - rubric[key].points, action: rubric[key].toMax }))
-    .filter((g) => g.gain > 0)
-    .sort((a, b) => b.gain - a.gain);
-  return (
-    <Card style={styles.toTen}>
-      <Text style={[type.overline, { color: colors.accent }]}>{gaps.length ? t.result.toTen : t.result.perfect}</Text>
-      {gaps.map((g) => (
-        <View key={g.key} style={styles.item}>
-          <Text style={styles.gain}>+{g.gain}</Text>
-          <Text style={[type.body, { flex: 1 }]}>{g.action || t.result.criteria[g.key]}</Text>
-        </View>
-      ))}
-    </Card>
-  );
-}
+// Mirror of Delivery in the backend (Govori.Core/Abstractions.cs); used only to show which norm was missed.
+const NORMS = { minWpm: 110, maxWpm: 160, maxFillersPerMinute: 2, minSeconds: 45 };
 
-function RubricRows({ rubric }: { rubric: Rubric }) {
+function CriterionRow({
+  label,
+  criterion,
+  delivery,
+  first,
+}: {
+  label: string;
+  criterion: Criterion;
+  delivery: Metrics | null;
+  first: boolean;
+}) {
+  const ok = criterion.points === 2;
   return (
-    <>
-      {RUBRIC_KEYS.map((key) => (
-        <CriterionRow key={key} label={t.result.criteria[key]} criterion={rubric[key]} />
-      ))}
-    </>
-  );
-}
-
-function CriterionRow({ label, criterion }: { label: string; criterion: Criterion }) {
-  return (
-    <View style={{ gap: 4 }}>
+    <View style={[styles.criterion, !first && styles.divider]}>
       <View style={styles.criterionHead}>
         <Text style={type.heading}>{label}</Text>
         <Points value={criterion.points} />
       </View>
-      {!!criterion.evidence && <Text style={type.small}>{criterion.evidence}</Text>}
+      {delivery ? (
+        <DeliveryRows metrics={delivery} />
+      ) : (
+        <>
+          <View style={styles.status}>
+            <StatusIcon ok={ok} />
+            <Text style={[type.body, { flex: 1, fontSize: 14, lineHeight: 20 }]}>
+              <Text style={[styles.statusLabel, { color: ok ? colors.success : colors.danger }]}>
+                {ok ? t.result.allGood : t.result.weakness}
+              </Text>{' '}
+              {criterion.evidence}
+            </Text>
+          </View>
+        </>
+      )}
+      {!ok && !!criterion.toMax && (
+        <View style={styles.tip}>
+          <Text style={styles.tipTitle}>{t.result.howToImprove}</Text>
+          <Text style={[type.body, { fontSize: 14, lineHeight: 20 }]}>{criterion.toMax}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+/** Delivery split into the three measured norms, so it is clear which one cost the point. */
+function DeliveryRows({ metrics: m }: { metrics: Metrics }) {
+  const fillers = Object.values(m.fillerWords).reduce((a, b) => a + b, 0);
+  const perMinute = fillers / (Math.max(m.durationSec, 1) / 60);
+  const rows = [
+    {
+      label: t.result.delivery.pace,
+      ok: m.wordsPerMinute >= NORMS.minWpm && m.wordsPerMinute <= NORMS.maxWpm,
+      value: fmt(t.result.delivery.paceValue, { wpm: m.wordsPerMinute, min: NORMS.minWpm, max: NORMS.maxWpm }),
+    },
+    {
+      label: t.result.delivery.fillers,
+      ok: perMinute <= NORMS.maxFillersPerMinute,
+      value: fmt(t.result.delivery.fillersValue, { n: fillers, max: NORMS.maxFillersPerMinute }),
+    },
+    {
+      label: t.result.delivery.duration,
+      ok: m.durationSec >= NORMS.minSeconds,
+      value: fmt(t.result.delivery.durationValue, { sec: m.durationSec, min: NORMS.minSeconds }),
+    },
+  ];
+  return (
+    <View style={{ gap: spacing(1), marginTop: spacing(1) }}>
+      {rows.map((r) => (
+        <View key={r.label} style={styles.metric}>
+          <StatusIcon ok={r.ok} />
+          <Text style={[styles.metricLabel, !r.ok && { color: colors.danger }]}>{r.label}</Text>
+          <Text style={[type.small, { flex: 1 }]}>{r.value}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function StatusIcon({ ok }: { ok: boolean }) {
+  return (
+    <View style={[styles.statusIcon, { backgroundColor: ok ? colors.success : colors.danger }]}>
+      <Text style={styles.statusIconText}>{ok ? '✓' : '!'}</Text>
     </View>
   );
 }
@@ -209,70 +250,52 @@ function Points({ value }: { value: number }) {
       {[1, 2].map((i) => (
         <View key={i} style={[styles.point, i <= value && { backgroundColor: colors.ink }]} />
       ))}
+      <Text style={styles.pointsText}>{value}/2</Text>
     </View>
   );
 }
 
-const SKELETON_STEPS: (keyof Skeleton)[] = ['point', 'reason', 'example', 'conclusion'];
+/** Vocabulary with replacements for repeated words, plus one short exercise for the next attempt. */
+function PracticeCard({
+  evaluation,
+  repeats,
+}: {
+  evaluation: Evaluation;
+  repeats: { word: string; count: number }[];
+}) {
+  const synonyms = evaluation.synonyms ?? [];
+  const counts = new Map(repeats.map((r) => [r.word, r.count]));
+  const exercise = evaluation.suggestions[0];
+  // Older evaluations have no synonyms; their vocabulary drill is shown instead.
+  const drill = synonyms.length === 0 ? evaluation.drill : null;
+  if (synonyms.length === 0 && !drill && !exercise) return null;
 
-/** The speech laid out on PREP steps, so the missing link is visible. */
-function SkeletonCard({ skeleton }: { skeleton: Skeleton }) {
   return (
-    <Card style={{ gap: spacing(1.5) }}>
-      <Text style={type.overline}>{t.result.skeleton}</Text>
-      {SKELETON_STEPS.map((step) => {
-        const quote = skeleton[step];
-        return (
-          <View key={step} style={styles.step}>
-            <Text style={[styles.stepLabel, !quote && { color: colors.danger }]}>{t.result.skeletonSteps[step]}</Text>
-            <Text style={[type.small, { flex: 1 }, quote ? { color: colors.ink } : { color: colors.danger }]}>
-              {quote ? `«${quote}»` : t.result.missing}
-            </Text>
-          </View>
-        );
-      })}
-    </Card>
-  );
-}
-
-/** Toastmasters-style feedback: one thing that worked, one fix, one exercise. */
-function AdviceCard({ evaluation }: { evaluation: Evaluation }) {
-  const rows = [
-    { title: t.result.worked, text: evaluation.strengths[0] },
-    { title: t.result.fix, text: evaluation.improvements[0] },
-    { title: t.result.exercise, text: evaluation.suggestions[0] },
-  ].filter((r) => !!r.text);
-  if (rows.length === 0) return null;
-  return (
-    <Card style={{ gap: spacing(2) }}>
-      {rows.map((r) => (
-        <View key={r.title} style={{ gap: 4 }}>
-          <Text style={type.overline}>{r.title}</Text>
-          <Text style={type.body}>{r.text}</Text>
-        </View>
-      ))}
-    </Card>
-  );
-}
-
-/** A vocabulary exercise, shown only when the speech was monotonous. */
-function DrillCard({ drill, repeats }: { drill: string; repeats: { word: string; count: number }[] }) {
-  return (
-    <Card style={{ gap: spacing(1.5) }}>
-      <Text style={type.overline}>{t.result.drill}</Text>
-      <Text style={type.body}>{drill}</Text>
-      {repeats.length > 0 && (
-        <View style={{ gap: spacing(1) }}>
-          <Text style={type.small}>{t.result.repeats}</Text>
-          <View style={styles.chips}>
-            {repeats.map((r) => (
-              <View key={r.word} style={styles.chip}>
+    <Card style={{ gap: spacing(1.25) }}>
+      <Text style={type.overline}>{t.result.practice}</Text>
+      {(synonyms.length > 0 || !!drill) && (
+        <View style={{ gap: spacing(1.25) }}>
+          <Text style={type.heading}>{t.result.vocabulary}</Text>
+          {synonyms.length > 0 && <Text style={type.small}>{t.result.vocabularyHint}</Text>}
+          {synonyms.map((s) => (
+            <View key={s.word} style={styles.synonym}>
+              <View style={styles.chip}>
                 <Text style={styles.chipText}>
-                  {r.word} · {r.count}
+                  {s.word}
+                  {counts.has(s.word) ? ` · ${counts.get(s.word)}` : ''}
                 </Text>
               </View>
-            ))}
-          </View>
+              <Text style={styles.arrow}>→</Text>
+              <Text style={[type.body, { flex: 1, fontSize: 14, lineHeight: 19 }]}>{s.options.join(', ')}</Text>
+            </View>
+          ))}
+          {!!drill && <Text style={type.body}>{drill}</Text>}
+        </View>
+      )}
+      {!!exercise && (
+        <View style={{ gap: 4, marginTop: spacing(1) }}>
+          <Text style={type.heading}>{t.result.exercise30}</Text>
+          <Text style={type.body}>{exercise}</Text>
         </View>
       )}
     </Card>
@@ -295,6 +318,11 @@ function SubScoreBars({ scores }: { scores: SubScores }) {
   );
 }
 
+/** About how long the voice-over runs, shown before it is loaded: ~2.5 words a second. */
+function estimateSeconds(text: string | null) {
+  return text ? Math.round(text.split(/\s+/).filter(Boolean).length / 2.5) : 0;
+}
+
 /** The AI coach's spoken review, with the written version behind a toggle. */
 function ReviewCard({
   attemptId,
@@ -312,7 +340,7 @@ function ReviewCard({
   return (
     <Card style={{ gap: spacing(2) }}>
       <Text style={type.overline}>{t.result.review}</Text>
-      {hasAudio && <ReviewPlayer attemptId={attemptId} />}
+      {hasAudio && <ReviewPlayer attemptId={attemptId} estimatedDuration={estimateSeconds(reviewText)} />}
       {hasAudio && (
         <Pressable
           onPress={() => setOpen((v) => !v)}
@@ -321,8 +349,8 @@ function ReviewCard({
           <ChevronIcon up={open} color={colors.ink} />
         </Pressable>
       )}
-      {open && (
-        reviewText !== null ? (
+      {open &&
+        (reviewText !== null ? (
           <Text style={type.body}>{reviewText}</Text>
         ) : (
           <View style={{ gap: spacing(2.5) }}>
@@ -330,8 +358,7 @@ function ReviewCard({
             <ReviewList title={t.result.improvements} items={evaluation.improvements} mark="–" />
             <ReviewList title={t.result.suggestions} items={evaluation.suggestions} mark="→" />
           </View>
-        )
-      )}
+        ))}
     </Card>
   );
 }
@@ -350,15 +377,6 @@ function ReviewList({ title, items, mark }: { title: string; items: string[]; ma
         </View>
       ))}
     </View>
-  );
-}
-
-function Stat({ value, label }: { value: number | string; label: string }) {
-  return (
-    <Card style={styles.stat}>
-      <Text style={type.title}>{value}</Text>
-      <Text style={type.small}>{label}</Text>
-    </Card>
   );
 }
 
@@ -382,9 +400,9 @@ function FillerChips({ fillers }: { fillers: Record<string, number> }) {
 function Transcript({ text, fillers }: { text: string; fillers: string[] }) {
   if (fillers.length === 0) return <Text style={type.body}>{text}</Text>;
   const escaped = fillers
-    .map((f) => (f === 'э-э' ? 'э+-?э*м*' : f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    .map((f) => (f === 'э-э' ? 'э+-?э*м*|м{2,}' : f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     .sort((a, b) => b.length - a.length);
-  const re = new RegExp(`(?<![\\p{L}])(${escaped.join('|')})(?![\\p{L}])`, 'giu');
+  const re = new RegExp(`(?<![\\p{L}])(${escaped.join('|')})(?![\\p{L}-])`, 'giu');
   const parts = text.split(re);
   return (
     <Text style={[type.body, { color: '#3A3A3C' }]}>
@@ -402,13 +420,30 @@ function Transcript({ text, fillers }: { text: string; fillers: string[] }) {
 }
 
 const styles = StyleSheet.create({
-  toTen: { backgroundColor: colors.accentTint, gap: spacing(1.5) },
-  gain: { fontFamily: fonts.bold, fontSize: 15, color: colors.accent, width: 28 },
+  criterion: { gap: 6, paddingVertical: spacing(1.75) },
+  divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   criterionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  points: { flexDirection: 'row', gap: 4 },
+  points: { flexDirection: 'row', gap: 4, alignItems: 'center' },
   point: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.line },
-  step: { flexDirection: 'row', gap: spacing(1.5), alignItems: 'flex-start' },
-  stepLabel: { fontFamily: fonts.semibold, fontSize: 13, color: colors.ink, width: 72 },
+  pointsText: { fontFamily: fonts.medium, fontSize: 12, color: colors.muted, marginLeft: 6 },
+  status: { flexDirection: 'row', gap: spacing(1), alignItems: 'flex-start' },
+  statusLabel: { fontFamily: fonts.semibold },
+  statusIcon: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  statusIconText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
+  metric: { flexDirection: 'row', alignItems: 'center', gap: spacing(1) },
+  metricLabel: { fontFamily: fonts.semibold, fontSize: 14, color: colors.ink, width: 104 },
+  tip: {
+    backgroundColor: colors.accentTint,
+    borderRadius: 16,
+    padding: spacing(1.5),
+    gap: 4,
+    marginTop: spacing(0.75),
+    marginLeft: 28,
+  },
+  tipTitle: { ...type.overline, color: colors.accent },
+  synonym: { flexDirection: 'row', alignItems: 'center', gap: spacing(1) },
+  arrow: { color: colors.faint, fontSize: 14 },
+  recording: { backgroundColor: colors.fill, borderRadius: 20, padding: spacing(1.5) },
   hero: { alignItems: 'center', gap: spacing(1.25), paddingVertical: spacing(3.5) },
   scoreRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: spacing(1) },
   score: { fontFamily: fonts.semibold, fontSize: 72, letterSpacing: -3, lineHeight: 78, color: colors.ink },
@@ -419,8 +454,6 @@ const styles = StyleSheet.create({
   barTrack: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.fill, overflow: 'hidden' },
   barFill: { height: 4, borderRadius: 2, backgroundColor: colors.ink },
   barValue: { width: 20, textAlign: 'right', fontFamily: fonts.semibold, color: colors.ink },
-  stats: { flexDirection: 'row', gap: spacing(1.5) },
-  stat: { flex: 1, alignItems: 'center', gap: 2, padding: spacing(2) },
   item: { flexDirection: 'row', gap: spacing(1.5), alignItems: 'flex-start' },
   mark: {
     width: 24,

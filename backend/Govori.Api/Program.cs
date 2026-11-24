@@ -42,8 +42,14 @@ else
 // It is voiced on demand, when the user first presses play.
 if (!string.IsNullOrWhiteSpace(openAiKey))
     builder.Services.AddHttpClient<ISpeechSynthesizer, OpenAiSpeechSynthesizer>((http, sp) =>
-        new OpenAiSpeechSynthesizer(http, sp.GetRequiredService<IContentProvider>(), openAiKey,
-            config["OpenAI:TtsModel"] ?? "gpt-4o-mini-tts", config["OpenAI:TtsVoice"] ?? "nova"));
+    {
+        // Up to three voicings when the model drifts from the text, each taking 10–30 seconds.
+        http.Timeout = TimeSpan.FromMinutes(3);
+        return new OpenAiSpeechSynthesizer(http, sp.GetRequiredService<IContentProvider>(),
+            sp.GetRequiredService<ILogger<OpenAiSpeechSynthesizer>>(), openAiKey,
+            config["OpenAI:TtsModel"] ?? "gpt-audio", config["OpenAI:TtsVoice"] ?? "coral",
+            double.Parse(config["OpenAI:TtsSpeed"] ?? "1.2", System.Globalization.CultureInfo.InvariantCulture));
+    });
 
 var anthropicKey = config["Anthropic:ApiKey"];
 if (string.IsNullOrWhiteSpace(anthropicKey))

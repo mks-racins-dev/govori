@@ -44,6 +44,7 @@ export type SubScores = {
 };
 
 /** One rubric criterion: 0–2 points, the evidence, and what would have earned 2 (empty at 2). */
+/** `toMax` is the "how to improve" tip; for delivery it has one line per missed norm. */
 export type Criterion = { points: number; evidence: string; toMax: string };
 
 export type RubricKey = 'thought' | 'support' | 'conclusion' | 'coherence' | 'delivery';
@@ -60,6 +61,8 @@ export type Evaluation = {
   skeleton: Skeleton | null;
   /** A vocabulary drill, only when the speech was monotonous. */
   drill?: string | null;
+  /** Replacements for each word the speaker repeated; missing on older evaluations. */
+  synonyms?: { word: string; options: string[] }[] | null;
   summary: string;
   strengths: string[];
   improvements: string[];

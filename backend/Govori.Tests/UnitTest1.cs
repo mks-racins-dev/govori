@@ -104,6 +104,18 @@ public class ClaudeEvaluatorTests
     }
 
     [Fact]
+    public void Synonyms_are_kept_only_for_counted_repeats()
+    {
+        var json = Reply.Replace("\"review\":", "\"synonyms\":[{\"word\":\"Очень\",\"options\":[\"крайне\",\" весьма \",\"\",\"крайне\"]},{\"word\":\"лишнее\",\"options\":[\"x\"]}],\"review\":");
+        var m = GoodDelivery with { Vocabulary = new VocabularyStats(0.5, [new("очень", 5)], IsLow: true) };
+
+        var s = Assert.Single(ClaudeEvaluator.ParseResponse(Wrap(json), m).Result.Synonyms!);
+        Assert.Equal("очень", s.Word);
+        Assert.Equal(["крайне", "весьма"], s.Options);
+        Assert.Null(ClaudeEvaluator.ParseResponse(Wrap(json), GoodDelivery).Result.Synonyms);
+    }
+
+    [Fact]
     public void Blank_skeleton_steps_become_null()
     {
         var sk = ClaudeEvaluator.ParseResponse(Wrap(Reply), GoodDelivery).Result.Skeleton!;
@@ -270,4 +282,29 @@ public class VocabularyTests
 
     [Fact]
     public void Too_little_speech_is_not_judged() => Assert.Null(Vocabulary.Analyze("Ну вот такой короткий ответ получился.", "Тема", Fillers));
+}
+
+public class VoicedReviewCheckTests
+{
+    private const string Text = "Так, слушай... Начало хорошее. В целом — шесть из десяти, и это крепкая база.";
+
+    [Fact]
+    public void Word_for_word_reading_passes()
+    {
+        Assert.Equal(1, OpenAiSpeechSynthesizer.Similarity(Text, "Так, слушай. Начало хорошее! В целом шесть из десяти, и это крепкая база."));
+        Assert.True(OpenAiSpeechSynthesizer.SameNumbers(Text, "так слушай начало хорошее в целом шесть из десяти и это крепкая база"));
+    }
+
+    [Fact]
+    public void Added_or_dropped_words_lower_the_similarity()
+    {
+        var s = OpenAiSpeechSynthesizer.Similarity(Text, "Так, слушай внимательно, дружище. В общем, крепкая база.");
+        Assert.True(s < OpenAiSpeechSynthesizer.MinSimilarity);
+    }
+
+    [Fact]
+    public void A_changed_score_is_caught()
+    {
+        Assert.False(OpenAiSpeechSynthesizer.SameNumbers(Text, "Так, слушай... Начало хорошее. В целом — семь из десяти, и это крепкая база."));
+    }
 }

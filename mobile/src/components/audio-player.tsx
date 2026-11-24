@@ -1,7 +1,8 @@
 import { AudioSource, setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { t } from '@/i18n/ru';
 import { api } from '@/lib/api';
 import { formatClock } from '@/lib/format';
 import { colors, spacing, type } from '@/theme';
@@ -21,28 +22,36 @@ export function AttemptPlayer({ attemptId, fallbackDuration }: { attemptId: stri
 
 /**
  * Plays the AI coach's spoken review of an attempt. The server voices the review on the first request,
- * so nothing is loaded until the user presses play.
+ * so nothing is loaded until the user presses play. That first request can take several seconds, longer
+ * than the native player waits, so it is made here first; the player then gets the already voiced file
+ * and starts on the first tap.
  */
-export function ReviewPlayer({ attemptId }: { attemptId: string }) {
+export function ReviewPlayer({ attemptId, estimatedDuration }: { attemptId: string; estimatedDuration: number }) {
   const [source, setSource] = useState<AudioSource | null>(null);
   const [requested, setRequested] = useState(false);
   const [error, setError] = useState(false);
   const seed = `review-${attemptId}`;
 
-  const request = () => {
+  const request = async () => {
     setRequested(true);
     setError(false);
-    api.reviewAudioSource(attemptId).then(setSource).catch(() => {
+    try {
+      const src = await api.reviewAudioSource(attemptId);
+      // Two bytes are enough to make the server voice and store the review.
+      const res = await fetch(src.uri, { headers: { ...src.headers, Range: 'bytes=0-1' } });
+      if (!res.ok) throw new Error(String(res.status));
+      setSource(src);
+    } catch {
       setRequested(false);
       setError(true);
-    });
+    }
   };
 
   return source ? (
     <Player
       source={source}
       seed={seed}
-      fallbackDuration={0}
+      fallbackDuration={estimatedDuration}
       autoPlay
       onError={() => {
         setSource(null);
@@ -51,7 +60,7 @@ export function ReviewPlayer({ attemptId }: { attemptId: string }) {
       }}
     />
   ) : (
-    <IdlePlayer seed={seed} onPlay={request} loading={requested} error={error} />
+    <IdlePlayer seed={seed} onPlay={request} loading={requested} error={error} duration={estimatedDuration} />
   );
 }
 
@@ -61,23 +70,25 @@ function IdlePlayer({
   onPlay,
   loading,
   error,
+  duration,
 }: {
   seed: string;
   onPlay: () => void;
   loading: boolean;
   error?: boolean;
+  duration: number;
 }) {
   const levels = useMemo(() => placeholderLevels(seed, 34), [seed]);
   return (
     <View style={styles.row}>
       <Pressable onPress={onPlay} style={styles.play} disabled={loading}>
-        <PlayIcon size={18} color="#fff" />
+        {loading ? <ActivityIndicator color="#fff" /> : <PlayIcon size={18} color="#fff" />}
       </Pressable>
       <View style={{ flex: 1, gap: 4 }}>
         <Waveform levels={levels} progress={0} height={36} barWidth={2.5} gap={2.5} />
         <View style={styles.times}>
           <Text style={type.label}>{formatClock(0)}</Text>
-          <Text style={type.label}>{error ? 'Try again' : formatClock(0)}</Text>
+          <Text style={type.label}>{error ? t.common.error : formatClock(duration)}</Text>
         </View>
       </View>
     </View>
