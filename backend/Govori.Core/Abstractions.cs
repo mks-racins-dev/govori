@@ -48,14 +48,18 @@ public interface IContentProvider
 public static class SettingKeys
 {
     // Renamed with the rubric: the old prompt asked for a different JSON shape, so it must not be reused.
-    public const string EvaluationSystemPrompt = "evaluation.rubricPrompt";
+    // Versioned keys: defaults are seeded only when a key is missing, so a new version is how changed
+    // defaults reach an existing database. v2 of the prompt adds synonyms and practical "how to improve" tips.
+    public const string EvaluationSystemPrompt = "evaluation.rubricPrompt.v2";
     public const string TranscriptionPrompt = "transcription.prompt";
-    public const string FillersSingle = "fillers.single";   // one word per line
-    public const string FillersPhrases = "fillers.phrases"; // one phrase per line
+    public const string FillersSingle = "fillers.single.v2";   // one word per line
+    public const string FillersPhrases = "fillers.phrases.v2"; // one phrase per line
     public const string EvaluationFailed = "errors.evaluationFailed";
     public const string NoSpeech = "errors.noSpeech";
-    public const string ReviewSystemPrompt = "review.systemPrompt";
-    public const string ReviewVoiceInstructions = "review.voiceInstructions";
+    // v2: the review is written for the ear (no abbreviations, numbers in words) and voiced by gpt-audio,
+    // which takes the instructions as a system prompt and must read the text word for word.
+    public const string ReviewSystemPrompt = "review.systemPrompt.v2";
+    public const string ReviewVoiceInstructions = "review.voiceInstructions.v2";
 }
 
 /// <param name="Clarity">See <see cref="Transcription.Clarity"/>. Shown to the user, not scored.</param>
@@ -71,7 +75,7 @@ public record SubScores(int Structure, int Relevance, int Vocabulary, int Fluenc
 
 /// <param name="Points">0, 1 or 2.</param>
 /// <param name="Evidence">Why: a short quote or fact from the speech.</param>
-/// <param name="ToMax">What would have earned 2 points; empty when it already has 2.</param>
+/// <param name="ToMax">How to improve: a practical technique that would have earned 2 points; empty at 2.</param>
 public record Criterion(int Points, string Evidence, string ToMax);
 
 /// <summary>
@@ -106,7 +110,11 @@ public record EvaluationResult(
     List<string> Suggestions,
     Rubric? Rubric = null,
     Skeleton? Skeleton = null,
-    string? Drill = null);
+    string? Drill = null,
+    List<WordSynonyms>? Synonyms = null);
+
+/// <summary>Replacements for a word the speaker repeated too often.</summary>
+public record WordSynonyms(string Word, List<string> Options);
 
 /// <summary>Scores delivery from measured numbers, so it can't be inflated by the model.</summary>
 public static class Delivery
@@ -118,15 +126,19 @@ public static class Delivery
     {
         var fillersPerMin = m.FillerTotal / (Math.Max(m.DurationSec, 1) / 60.0);
         var fixes = new List<string>();
-        if (m.WordsPerMinute < MinWpm) fixes.Add($"говорить чуть быстрее (сейчас {m.WordsPerMinute} сл/мин, норма {MinWpm}–{MaxWpm})");
-        else if (m.WordsPerMinute > MaxWpm) fixes.Add($"говорить чуть медленнее (сейчас {m.WordsPerMinute} сл/мин, норма {MinWpm}–{MaxWpm})");
-        if (fillersPerMin > MaxFillersPerMinute) fixes.Add("заменить слова-паразиты паузой");
-        if (m.DurationSec < MinSeconds) fixes.Add($"говорить не меньше {MinSeconds} секунд");
+        if (m.WordsPerMinute < MinWpm)
+            fixes.Add("Темп: говорите короткими фразами по 5–7 слов и не тяните окончания — так речь сама ускоряется.");
+        else if (m.WordsPerMinute > MaxWpm)
+            fixes.Add("Темп: после каждой мысли делайте паузу на вдох — слушателю нужно время, чтобы её услышать.");
+        if (fillersPerMin > MaxFillersPerMinute)
+            fixes.Add("Паразиты: почувствовали «ну» на языке — замолчите на секунду и выдохните. Пауза звучит увереннее любого слова.");
+        if (m.DurationSec < MinSeconds)
+            fixes.Add($"Длительность: говорите не меньше {MinSeconds} секунд — если мысль закончилась, добавьте ещё один пример из жизни.");
 
         var points = fixes.Count switch { 0 => 2, 1 => 1, _ => 0 };
         var evidence = string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"{m.WordsPerMinute} сл/мин · {fillersPerMin:0.#} паразит./мин · {m.DurationSec} с");
-        var toMax = fixes.Count == 0 ? "" : char.ToUpperInvariant(fixes[0][0]) + string.Join("; ", fixes)[1..];
+        var toMax = string.Join("\n", fixes);
         return new Criterion(points, evidence, toMax);
     }
 }

@@ -168,16 +168,35 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
             rubric,
             new Skeleton(Quote(sk?.Point), Quote(sk?.Reason), Quote(sk?.Example), Quote(sk?.Conclusion)),
             // The app decides whether a drill is due; the model only writes it.
-            metrics.Vocabulary is { IsLow: true } ? Quote(reply.Drill) : null);
+            metrics.Vocabulary is { IsLow: true } ? Quote(reply.Drill) : null,
+            Synonyms(reply.Synonyms, metrics));
         return new Evaluated(result, string.IsNullOrWhiteSpace(reply.Review) ? null : reply.Review.Trim());
     }
 
+    /// <summary>Keeps only synonyms for words the app counted as repeats, in the app's order.</summary>
+    private static List<WordSynonyms>? Synonyms(List<ReplySynonyms>? reply, SpeechMetrics metrics)
+    {
+        if (reply is null || metrics.Vocabulary is not { Repeats.Count: > 0 } v) return null;
+        var byWord = reply
+            .Where(s => !string.IsNullOrWhiteSpace(s.Word))
+            .GroupBy(s => s.Word!.Trim().ToLowerInvariant())
+            .ToDictionary(g => g.Key, g => g.First().Options ?? []);
+        var list = v.Repeats
+            .Select(r => new WordSynonyms(r.Word,
+                byWord.GetValueOrDefault(r.Word.ToLowerInvariant(), [])
+                    .Select(o => o.Trim()).Where(o => o != "").Distinct().Take(3).ToList()))
+            .Where(s => s.Options.Count > 0)
+            .ToList();
+        return list.Count == 0 ? null : list;
+    }
+
+    private sealed record ReplySynonyms(string? Word, List<string>? Options);
     private sealed record ReplyCriterion(int Points, string? Evidence, string? ToMax);
     private sealed record ReplySkeleton(string? Point, string? Reason, string? Example, string? Conclusion);
     private sealed record Reply(
         ReplyCriterion? Thought, ReplyCriterion? Support, ReplyCriterion? Conclusion, ReplyCriterion? Coherence,
         ReplySkeleton? Skeleton, string? Summary, string? Strength, string? Fix, string? Exercise, string? Drill,
-        string? Review);
+        string? Review, List<ReplySynonyms>? Synonyms = null);
 
     private static JsonObject Schema()
     {
@@ -226,10 +245,25 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
                 ["fix"] = Str(),
                 ["exercise"] = Str(),
                 ["drill"] = Str("Упражнение на словарь, если словарь однообразный; иначе пустая строка"),
+                ["synonyms"] = new JsonObject
+                {
+                    ["type"] = "array",
+                    ["items"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject
+                        {
+                            ["word"] = Str(),
+                            ["options"] = new JsonObject { ["type"] = "array", ["items"] = Str() },
+                        },
+                        ["required"] = new JsonArray("word", "options"),
+                        ["additionalProperties"] = false,
+                    },
+                },
                 ["review"] = Str("Голосовое сообщение тренера по правилам раздела «Поле review»"),
             },
             ["required"] = new JsonArray("thought", "support", "conclusion", "coherence", "skeleton",
-                "summary", "strength", "fix", "exercise", "drill", "review"),
+                "summary", "strength", "fix", "exercise", "drill", "synonyms", "review"),
             ["additionalProperties"] = false,
         };
     }
