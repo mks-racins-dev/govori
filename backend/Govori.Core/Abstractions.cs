@@ -50,7 +50,7 @@ public static class SettingKeys
     // Renamed with the rubric: the old prompt asked for a different JSON shape, so it must not be reused.
     // Versioned keys: defaults are seeded only when a key is missing, so a new version is how changed
     // defaults reach an existing database. v2 of the prompt adds synonyms and practical "how to improve" tips.
-    public const string EvaluationSystemPrompt = "evaluation.rubricPrompt.v3";
+    public const string EvaluationSystemPrompt = "evaluation.rubricPrompt.v4";
     public const string TranscriptionPrompt = "transcription.prompt";
     public const string FillersSingle = "fillers.single.v2";   // one word per line
     public const string FillersPhrases = "fillers.phrases.v2"; // one phrase per line
@@ -77,7 +77,35 @@ public record SubScores(int Structure, int Relevance, int Vocabulary, int Fluenc
 /// <param name="Evidence">Why: a short analysis with quotes from the speech.</param>
 /// <param name="ToMax">How to improve: a practical technique that would have earned 2 points; empty at 2.</param>
 /// <param name="Good">What worked, with a quote; empty when nothing did or on older evaluations.</param>
-public record Criterion(int Points, string Evidence, string ToMax, string Good = "");
+/// <param name="Advice">The technique to fix it; null at 2 points and on older evaluations.</param>
+public record Criterion(int Points, string Evidence, string ToMax, string Good = "", TechniqueAdvice? Advice = null);
+
+/// <summary>
+/// A technique from the catalog applied to this speech. Name and Formula come from the catalog, not the model;
+/// both are empty when the model named a technique the catalog doesn't have for this criterion.
+/// </summary>
+/// <param name="Before">A quote from the speech the technique fixes; empty when there is none to quote.</param>
+/// <param name="After">The same place rewritten with the technique, using only what the speaker said.</param>
+/// <param name="Hypothetical">After adds an example the speaker didn't give; the UI marks it as made up.</param>
+/// <param name="NextStep">One action for the next speech.</param>
+public record TechniqueAdvice(
+    string TechniqueId, string Name, string Formula, string Before, string After, bool Hypothetical, string NextStep);
+
+/// <summary>The one 30-second exercise, aimed at the weakest criterion and its technique.</summary>
+public record Practice(string TechniqueId, string Name, string Criterion, string Text)
+{
+    /// <summary>
+    /// The weakest criterion (fewest points; ties go to the earlier one, as structure comes before delivery)
+    /// with an advice technique; null when every criterion is at full marks.
+    /// </summary>
+    public static (string Key, Technique Technique)? Target(Rubric rubric) =>
+        rubric.All()
+            .Where(c => c.Criterion.Points < 2 && Techniques.ForCriterion(c.Criterion.Advice?.TechniqueId, c.Key) is not null)
+            .OrderBy(c => c.Criterion.Points)
+            .Select(c => (c.Key, Techniques.Find(c.Criterion.Advice!.TechniqueId)!))
+            .Cast<(string, Technique)?>()
+            .FirstOrDefault();
+}
 
 /// <summary>
 /// The scoring rubric: five criteria worth 0–2 each, adding up to the 0–10 score. Built on the PREP formula
@@ -112,7 +140,9 @@ public record EvaluationResult(
     Rubric? Rubric = null,
     Skeleton? Skeleton = null,
     string? Drill = null,
-    List<WordSynonyms>? Synonyms = null);
+    List<WordSynonyms>? Synonyms = null,
+    Practice? Practice = null,
+    string? DrillTechnique = null);
 
 /// <summary>Replacements for a word the speaker repeated too often.</summary>
 public record WordSynonyms(string Word, List<string> Options);
@@ -127,12 +157,24 @@ public static class Delivery
     {
         var fillersPerMin = m.FillerTotal / (Math.Max(m.DurationSec, 1) / 60.0);
         var fixes = new List<string>();
-        if (m.WordsPerMinute < MinWpm)
-            fixes.Add("Темп: говорите короткими фразами по 5–7 слов и не тяните окончания — так речь сама ускоряется.");
-        else if (m.WordsPerMinute > MaxWpm)
-            fixes.Add("Темп: после каждой мысли делайте паузу на вдох — слушателю нужно время, чтобы её услышать.");
+        // The technique for the main problem: fillers first, as they are the most audible, then pace.
+        string? technique = null;
         if (fillersPerMin > MaxFillersPerMinute)
-            fixes.Add("Паразиты: почувствовали «ну» на языке — замолчите на секунду и выдохните. Пауза звучит увереннее любого слова.");
+        {
+            var top = m.FillerWords.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).FirstOrDefault() ?? "ну";
+            fixes.Add($"Паразиты · Тихая пауза: почувствовали «{top}» на языке — замолчите на секунду. Пауза звучит увереннее любого слова.");
+            technique = "silent-pause";
+        }
+        if (m.WordsPerMinute < MinWpm)
+        {
+            fixes.Add("Темп · Одна мысль — одно предложение: говорите фразами по 5–7 слов и ставьте точку — так речь сама ускоряется.");
+            technique ??= "one-thought-one-sentence";
+        }
+        else if (m.WordsPerMinute > MaxWpm)
+        {
+            fixes.Add("Темп · Смысловые блоки: после каждой законченной мысли — пауза на вдох, слушателю нужно время её услышать.");
+            technique ??= "chunking";
+        }
         if (m.DurationSec < MinSeconds)
             fixes.Add($"Длительность: говорите не меньше {MinSeconds} секунд — если мысль закончилась, добавьте ещё один пример из жизни.");
 
@@ -140,7 +182,10 @@ public static class Delivery
         var evidence = string.Create(System.Globalization.CultureInfo.InvariantCulture,
             $"{m.WordsPerMinute} сл/мин · {fillersPerMin:0.#} паразит./мин · {m.DurationSec} с");
         var toMax = string.Join("\n", fixes);
-        return new Criterion(points, evidence, toMax);
+        var advice = points < 2 && Techniques.Find(technique) is { } t
+            ? new TechniqueAdvice(t.Id, t.Name, t.Formula, "", "", false, t.Drill)
+            : null;
+        return new Criterion(points, evidence, toMax, "", advice);
     }
 }
 

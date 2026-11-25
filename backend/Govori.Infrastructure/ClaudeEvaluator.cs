@@ -29,8 +29,7 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
 
     public async Task<Evaluated> EvaluateAsync(EvaluationRequest request, CancellationToken ct)
     {
-        var system = await content.GetAsync(SettingKeys.EvaluationSystemPrompt, ct) + "\n\n" +
-                     ReviewSectionHeader + await content.GetAsync(SettingKeys.ReviewSystemPrompt, ct);
+        var system = await SystemPromptAsync(ct);
 
         var body = new JsonObject
         {
@@ -50,7 +49,22 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
             },
             ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = BuildMessage(request) }),
         };
+        return await SendAsync(body, request.Metrics, ct);
+    }
 
+    /// <summary>
+    /// The editable evaluation prompt, the technique catalog (owned by the app, so the model can only pick
+    /// known ids) and the editable review prompt.
+    /// </summary>
+    public async Task<string> SystemPromptAsync(CancellationToken ct) =>
+        await content.GetAsync(SettingKeys.EvaluationSystemPrompt, ct) + "\n\n" +
+        "## Каталог техник\n\n" +
+        "technique — только id из этого списка и только из раздела своего критерия.\n\n" +
+        Techniques.Catalog() + "\n\n" +
+        ReviewSectionHeader + await content.GetAsync(SettingKeys.ReviewSystemPrompt, ct);
+
+    private async Task<Evaluated> SendAsync(JsonObject body, SpeechMetrics metrics, CancellationToken ct)
+    {
         Exception? last = null;
         for (var attempt = 0; attempt < 2; attempt++)
         {
@@ -68,7 +82,7 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
                 if (!res.IsSuccessStatusCode)
                     throw new InvalidOperationException($"Claude request failed ({(int)res.StatusCode}): {text}");
 
-                return ParseResponse(text, request.Metrics);
+                return ParseResponse(text, metrics);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -109,6 +123,12 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
             if (p.Rubric is { } pr)
                 sb.AppendLine(inv, $"Прошлые баллы: {string.Join(", ", pr.All().Select(c => $"{Names[c.Key]} {c.Criterion.Points}/2"))}");
             sb.AppendLine(inv, $"В прошлый раз советовали улучшить: {string.Join("; ", p.Improvements)}");
+            var techniques = p.Rubric?.All()
+                .Where(c => c.Criterion.Advice is { Name: not "" })
+                .Select(c => $"{c.Criterion.Advice!.TechniqueId} ({Names[c.Key]})")
+                .ToList() ?? [];
+            if (techniques.Count > 0)
+                sb.AppendLine(inv, $"В прошлый раз советовали техники: {string.Join(", ", techniques)}");
         }
         else
         {
@@ -150,15 +170,9 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
         if (reply.Thought is null || reply.Support is null || reply.Conclusion is null || reply.Coherence is null)
             throw new InvalidOperationException("Evaluation is missing required fields.");
 
-        static Criterion Fix(ReplyCriterion c)
-        {
-            var points = Math.Clamp(c.Points, 0, 2);
-            return new Criterion(points, c.Evidence?.Trim() ?? "", points == 2 ? "" : c.ToMax?.Trim() ?? "",
-                c.Good?.Trim() ?? "");
-        }
-
-        var rubric = new Rubric(Fix(reply.Thought), Fix(reply.Support), Fix(reply.Conclusion), Fix(reply.Coherence),
-            Delivery.Score(metrics));
+        var rubric = new Rubric(Fix(reply.Thought, "thought"), Fix(reply.Support, "support"),
+            Fix(reply.Conclusion, "conclusion"), Fix(reply.Coherence, "coherence"), Delivery.Score(metrics));
+        var drillTechnique = Techniques.ForCriterion(reply.DrillTechnique, Techniques.Vocabulary);
         static List<string> One(string? s) => string.IsNullOrWhiteSpace(s) ? [] : [s.Trim()];
         static string? Quote(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
         var sk = reply.Skeleton;
@@ -170,8 +184,50 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
             new Skeleton(Quote(sk?.Point), Quote(sk?.Reason), Quote(sk?.Example), Quote(sk?.Conclusion)),
             // The app decides whether a drill is due; the model only writes it.
             metrics.Vocabulary is { IsLow: true } ? Quote(reply.Drill) : null,
-            Synonyms(reply.Synonyms, metrics));
+            Synonyms(reply.Synonyms, metrics),
+            PracticeFor(rubric, reply.Exercise, reply.ExerciseTechnique),
+            metrics.Vocabulary is { IsLow: true } && Quote(reply.Drill) is not null ? drillTechnique?.Name : null);
         return new Evaluated(result, string.IsNullOrWhiteSpace(reply.Review) ? null : reply.Review.Trim());
+    }
+
+    /// <summary>
+    /// The model's criterion with the technique checked against the catalog. No advice at full marks.
+    /// An unknown technique, or one from another criterion, keeps the model's example and next step
+    /// but loses the name and formula, which only the catalog may supply.
+    /// </summary>
+    private static Criterion Fix(ReplyCriterion c, string key)
+    {
+        var points = Math.Clamp(c.Points, 0, 2);
+        var evidence = c.Evidence?.Trim() ?? "";
+        var good = c.Good?.Trim() ?? "";
+        if (points == 2) return new Criterion(points, evidence, "", good);
+
+        var technique = Techniques.ForCriterion(c.Technique, key);
+        var after = c.After?.Trim() ?? "";
+        var next = c.NextStep?.Trim() ?? "";
+        if (technique is null && after == "" && next == "") return new Criterion(points, evidence, "", good);
+
+        var advice = new TechniqueAdvice(
+            technique?.Id ?? "", technique?.Name ?? "", technique?.Formula ?? "",
+            c.Before?.Trim() ?? "", after, c.Hypothetical, next != "" ? next : technique?.Drill ?? "");
+        // toMax keeps older app versions and the fallback review working.
+        var toMax = technique is null ? advice.NextStep : $"{technique.Name}: {advice.NextStep}";
+        return new Criterion(points, evidence, toMax, good, advice);
+    }
+
+    /// <summary>
+    /// The exercise for the weakest criterion. If the model aimed it at another technique, the catalog's drill
+    /// for the right one is used instead; with everything at full marks the model's exercise stays as is.
+    /// </summary>
+    public static Practice? PracticeFor(Rubric rubric, string? exercise, string? exerciseTechnique)
+    {
+        var text = exercise?.Trim() ?? "";
+        if (Practice.Target(rubric) is not { } target)
+            return text == "" ? null : new Practice("", "", "", text);
+        var (key, technique) = target;
+        return technique.Id == exerciseTechnique?.Trim() && text != ""
+            ? new Practice(technique.Id, technique.Name, key, text)
+            : new Practice(technique.Id, technique.Name, key, technique.Drill);
     }
 
     /// <summary>Keeps only synonyms for words the app counted as repeats, in the app's order.</summary>
@@ -192,12 +248,15 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
     }
 
     private sealed record ReplySynonyms(string? Word, List<string>? Options);
-    private sealed record ReplyCriterion(int Points, string? Evidence, string? ToMax, string? Good = null);
+    private sealed record ReplyCriterion(
+        int Points, string? Evidence, string? Good = null, string? Technique = null, string? Before = null,
+        string? After = null, bool Hypothetical = false, string? NextStep = null);
     private sealed record ReplySkeleton(string? Point, string? Reason, string? Example, string? Conclusion);
     private sealed record Reply(
         ReplyCriterion? Thought, ReplyCriterion? Support, ReplyCriterion? Conclusion, ReplyCriterion? Coherence,
         ReplySkeleton? Skeleton, string? Summary, string? Strength, string? Fix, string? Exercise, string? Drill,
-        string? Review, List<ReplySynonyms>? Synonyms = null);
+        string? Review, List<ReplySynonyms>? Synonyms = null, string? ExerciseTechnique = null,
+        string? DrillTechnique = null);
 
     private static JsonObject Schema()
     {
@@ -214,9 +273,14 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
                 ["points"] = new JsonObject { ["type"] = "integer" },
                 ["good"] = Str(),
                 ["evidence"] = Str(),
-                ["toMax"] = Str(),
+                ["technique"] = Str("id техники из каталога этого критерия; пустая строка при 2 баллах"),
+                ["before"] = Str(),
+                ["after"] = Str(),
+                ["hypothetical"] = new JsonObject { ["type"] = "boolean" },
+                ["nextStep"] = Str(),
             },
-            ["required"] = new JsonArray("points", "good", "evidence", "toMax"),
+            ["required"] = new JsonArray("points", "good", "evidence", "technique", "before", "after",
+                "hypothetical", "nextStep"),
             ["additionalProperties"] = false,
         };
 
@@ -246,7 +310,9 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
                 ["strength"] = Str(),
                 ["fix"] = Str(),
                 ["exercise"] = Str(),
+                ["exerciseTechnique"] = Str("id техники, на которую упражнение"),
                 ["drill"] = Str("Упражнение на словарь, если словарь однообразный; иначе пустая строка"),
+                ["drillTechnique"] = Str("id техники словаря для drill или пустая строка"),
                 ["synonyms"] = new JsonObject
                 {
                     ["type"] = "array",
@@ -265,7 +331,7 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
                 ["review"] = Str("Голосовое сообщение тренера по правилам раздела «Поле review»"),
             },
             ["required"] = new JsonArray("thought", "support", "conclusion", "coherence", "skeleton",
-                "summary", "strength", "fix", "exercise", "drill", "synonyms", "review"),
+                "summary", "strength", "fix", "exercise", "exerciseTechnique", "drill", "drillTechnique", "synonyms", "review"),
             ["additionalProperties"] = false,
         };
     }
