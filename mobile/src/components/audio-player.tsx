@@ -14,7 +14,7 @@ export function AttemptPlayer({ attemptId, fallbackDuration }: { attemptId: stri
   const [source, setSource] = useState<AudioSource | null>(null);
 
   useEffect(() => {
-    api.audioSource(attemptId).then(setSource);
+    api.audioSource(attemptId).then(setSource).catch(() => setSource(null));
   }, [attemptId]);
 
   return source ? <Player source={source} seed={attemptId} fallbackDuration={fallbackDuration} /> : null;
@@ -22,9 +22,8 @@ export function AttemptPlayer({ attemptId, fallbackDuration }: { attemptId: stri
 
 /**
  * Plays the AI coach's spoken review of an attempt. The server voices the review on the first request,
- * so nothing is loaded until the user presses play. That first request can take several seconds, longer
- * than the native player waits, so it is made here first; the player then gets the already voiced file
- * and starts on the first tap.
+ * so nothing is loaded until the user presses play; the source resolves once the review is voiced, and the
+ * player then starts on that first tap.
  */
 export function ReviewPlayer({ attemptId, estimatedDuration }: { attemptId: string; estimatedDuration: number }) {
   const [source, setSource] = useState<AudioSource | null>(null);
@@ -36,11 +35,7 @@ export function ReviewPlayer({ attemptId, estimatedDuration }: { attemptId: stri
     setRequested(true);
     setError(false);
     try {
-      const src = await api.reviewAudioSource(attemptId);
-      // Two bytes are enough to make the server voice and store the review.
-      const res = await fetch(src.uri, { headers: { ...src.headers, Range: 'bytes=0-1' } });
-      if (!res.ok) throw new Error(String(res.status));
-      setSource(src);
+      setSource(await api.reviewAudioSource(attemptId));
     } catch {
       setRequested(false);
       setError(true);

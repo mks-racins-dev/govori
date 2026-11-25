@@ -50,7 +50,7 @@ public static class SettingKeys
     // Renamed with the rubric: the old prompt asked for a different JSON shape, so it must not be reused.
     // Versioned keys: defaults are seeded only when a key is missing, so a new version is how changed
     // defaults reach an existing database. v2 of the prompt adds synonyms and practical "how to improve" tips.
-    public const string EvaluationSystemPrompt = "evaluation.rubricPrompt.v2";
+    public const string EvaluationSystemPrompt = "evaluation.rubricPrompt.v3";
     public const string TranscriptionPrompt = "transcription.prompt";
     public const string FillersSingle = "fillers.single.v2";   // one word per line
     public const string FillersPhrases = "fillers.phrases.v2"; // one phrase per line
@@ -74,9 +74,10 @@ public record SpeechMetrics(
 public record SubScores(int Structure, int Relevance, int Vocabulary, int Fluency, int Pace);
 
 /// <param name="Points">0, 1 or 2.</param>
-/// <param name="Evidence">Why: a short quote or fact from the speech.</param>
+/// <param name="Evidence">Why: a short analysis with quotes from the speech.</param>
 /// <param name="ToMax">How to improve: a practical technique that would have earned 2 points; empty at 2.</param>
-public record Criterion(int Points, string Evidence, string ToMax);
+/// <param name="Good">What worked, with a quote; empty when nothing did or on older evaluations.</param>
+public record Criterion(int Points, string Evidence, string ToMax, string Good = "");
 
 /// <summary>
 /// The scoring rubric: five criteria worth 0–2 each, adding up to the 0–10 score. Built on the PREP formula

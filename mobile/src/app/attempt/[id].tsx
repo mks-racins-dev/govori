@@ -181,15 +181,28 @@ function CriterionRow({
         <DeliveryRows metrics={delivery} />
       ) : (
         <>
-          <View style={styles.status}>
-            <StatusIcon ok={ok} />
-            <Text style={[type.body, { flex: 1, fontSize: 14, lineHeight: 20 }]}>
-              <Text style={[styles.statusLabel, { color: ok ? colors.success : colors.danger }]}>
-                {ok ? t.result.allGood : t.result.weakness}
-              </Text>{' '}
-              {criterion.evidence}
-            </Text>
-          </View>
+          {!!criterion.good && (
+            <View style={styles.status}>
+              <StatusIcon ok />
+              <Text style={[type.body, { flex: 1, fontSize: 14, lineHeight: 20 }]}>
+                <Text style={[styles.statusLabel, { color: colors.success }]}>{t.result.worked}:</Text>{' '}
+                {criterion.good}
+              </Text>
+            </View>
+          )}
+          {ok && criterion.good ? (
+            <Text style={[type.body, styles.analysis]}>{criterion.evidence}</Text>
+          ) : (
+            <View style={styles.status}>
+              <StatusIcon ok={ok} />
+              <Text style={[type.body, { flex: 1, fontSize: 14, lineHeight: 20 }]}>
+                <Text style={[styles.statusLabel, { color: ok ? colors.success : colors.danger }]}>
+                  {ok ? t.result.allGood : t.result.weakness}
+                </Text>{' '}
+                {criterion.evidence}
+              </Text>
+            </View>
+          )}
         </>
       )}
       {!ok && !!criterion.toMax && (
@@ -441,6 +454,7 @@ const styles = StyleSheet.create({
     marginLeft: 28,
   },
   tipTitle: { ...type.overline, color: colors.accent },
+  analysis: { fontSize: 14, lineHeight: 20, color: colors.muted, marginLeft: 28 },
   synonym: { flexDirection: 'row', alignItems: 'center', gap: spacing(1) },
   arrow: { color: colors.faint, fontSize: 14 },
   recording: { backgroundColor: colors.fill, borderRadius: 20, padding: spacing(1.5) },
