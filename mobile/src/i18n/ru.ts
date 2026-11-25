@@ -41,6 +41,12 @@ export const ru = {
     categories: 'Категории',
     categoryLabel: 'Темы',
     genres: 'Жанр',
+    themes: 'Темы',
+    filter: 'Настроить · {on} из {all}',
+    filterTitle: 'Темы',
+    filterHint: 'Нажмите на тему, чтобы убрать её. Выключенные не показываются на главной и не выпадают случайно.',
+    filterLastOne: 'Хотя бы одна тема должна остаться включённой',
+    filterDone: 'Готово',
     /** Icon and one-line description per genre; a genre missing here gets a generic icon and no description. */
     genreInfo: {
       'Убедите': { icon: '📣', text: 'Склоните к решению' },
@@ -119,6 +125,13 @@ export const ru = {
     vocabulary: 'Разнообразьте словарь',
     vocabularyHint: 'Что вы повторяли чаще всего, и чем это можно заменить:',
     exercise30: 'Упражнение на 30 секунд',
+    technique: 'Техника',
+    formula: 'Формула',
+    tryThis: 'Попробуйте так',
+    was: 'Было',
+    became: 'Стало',
+    hypothetical: 'условный пример',
+    nextTime: 'В следующем выступлении',
     transcriptAndRecording: 'Расшифровка и запись',
     criteria: {
       thought: 'Главная мысль',
@@ -145,11 +158,6 @@ export const ru = {
       pace: 'Темп',
     },
   },
-  interests: {
-    title: 'Категории',
-    subtitle: 'Выключенные категории не попадаются в случайных темах. Включить их можно здесь в любой момент.',
-    lastOne: 'Хотя бы одна категория должна остаться включённой',
-  },
   history: {
     title: 'История',
     all: 'Все',
@@ -170,7 +178,6 @@ export const ru = {
     signOut: 'Выйти',
     deleteAccount: 'Удалить аккаунт',
     deleteConfirm: 'Все ваши записи и оценки будут удалены навсегда. Продолжить?',
-    interests: 'Интересные категории',
     criteria: 'По критериям',
     criteriaHint: 'Средний балл из 2 за последние выступления',
   },

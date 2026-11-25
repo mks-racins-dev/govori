@@ -1,4 +1,4 @@
-﻿using Govori.Core;
+using Govori.Core;
 using Govori.Infrastructure;
 
 namespace Govori.Tests;
@@ -306,5 +306,138 @@ public class VoicedReviewCheckTests
     public void A_changed_score_is_caught()
     {
         Assert.False(OpenAiSpeechSynthesizer.SameNumbers(Text, "Так, слушай... Начало хорошее. В целом — семь из десяти, и это крепкая база."));
+    }
+}
+
+public class TechniqueTests
+{
+    private static readonly SpeechMetrics GoodDelivery = new(60, 130, 130, []);
+
+    private static string Wrap(string json) => new System.Text.Json.Nodes.JsonObject
+    {
+        ["stop_reason"] = "end_turn",
+        ["content"] = new System.Text.Json.Nodes.JsonArray(
+            new System.Text.Json.Nodes.JsonObject { ["type"] = "text", ["text"] = json }),
+    }.ToJsonString();
+
+    private static string Reply(string thought, string support, string conclusion, string coherence,
+        string exerciseTechnique = "ring", string exercise = "Придумайте последнюю фразу.") => $$"""
+        {"thought":{{thought}},"support":{{support}},"conclusion":{{conclusion}},"coherence":{{coherence}},
+         "skeleton":{"point":null,"reason":null,"example":null,"conclusion":null},
+         "summary":"s","strength":"a","fix":"b","exercise":"{{exercise}}","exerciseTechnique":"{{exerciseTechnique}}",
+         "drill":"","drillTechnique":"","synonyms":[],"review":"r"}
+        """;
+
+    private static string C(int points, string technique = "", string after = "", string next = "") =>
+        $$"""{"points":{{points}},"good":"g","evidence":"e","technique":"{{technique}}","before":"до","after":"{{after}}","hypothetical":false,"nextStep":"{{next}}"}""";
+
+    private static readonly string Full = C(2);
+
+    private static readonly System.Text.Json.JsonSerializerOptions WebJson =
+        new(System.Text.Json.JsonSerializerDefaults.Web);
+
+    [Fact]
+    public void Catalog_ids_are_unique_and_every_criterion_has_techniques()
+    {
+        Assert.Equal(Techniques.All.Count, Techniques.All.Select(t => t.Id).Distinct().Count());
+        foreach (var key in new[] { "thought", "support", "conclusion", "coherence", "delivery", Techniques.Vocabulary })
+            Assert.Contains(Techniques.All, t => t.Criterion == key);
+        Assert.All(Techniques.All, t => Assert.False(string.IsNullOrWhiteSpace(t.Formula + t.Drill + t.Name)));
+    }
+
+    [Fact]
+    public void A_catalog_technique_gets_its_name_and_formula_from_the_app()
+    {
+        var (r, _) = ClaudeEvaluator.ParseResponse(Wrap(Reply(Full, Full, C(0, "ring", "«Поэтому…»", "Сделайте так."), Full)), GoodDelivery);
+        var a = r.Rubric!.Conclusion.Advice!;
+        Assert.Equal("ring", a.TechniqueId);
+        Assert.Equal(Techniques.Find("ring")!.Name, a.Name);
+        Assert.Equal(Techniques.Find("ring")!.Formula, a.Formula);
+        Assert.Equal("до", a.Before);
+        Assert.Equal("Сделайте так.", a.NextStep);
+    }
+
+    [Fact]
+    public void Full_marks_get_no_advice_even_if_the_model_sent_one()
+    {
+        var (r, _) = ClaudeEvaluator.ParseResponse(Wrap(Reply(C(2, "prep", "x", "y"), Full, Full, Full)), GoodDelivery);
+        Assert.Null(r.Rubric!.Thought.Advice);
+        Assert.Equal("", r.Rubric.Thought.ToMax);
+    }
+
+    [Theory]
+    [InlineData("no-such-technique")]
+    [InlineData("ring")] // exists, but belongs to "conclusion", not "thought"
+    public void Unknown_or_foreign_technique_keeps_the_example_but_not_the_name(string id)
+    {
+        var (r, _) = ClaudeEvaluator.ParseResponse(Wrap(Reply(C(1, id, "после", "шаг"), Full, Full, Full)), GoodDelivery);
+        var a = r.Rubric!.Thought.Advice!;
+        Assert.Equal("", a.TechniqueId);
+        Assert.Equal("", a.Name);
+        Assert.Equal("после", a.After);
+        Assert.Equal("шаг", r.Rubric.Thought.ToMax);
+    }
+
+    [Fact]
+    public void A_technique_is_never_reused_across_criteria()
+    {
+        // The model put "abt" (coherence) on every criterion; only coherence may keep it.
+        var abt = C(1, "abt", "a", "n");
+        var (r, _) = ClaudeEvaluator.ParseResponse(Wrap(Reply(abt, abt, abt, abt)), GoodDelivery);
+        var ids = r.Rubric!.All().Select(c => c.Criterion.Advice?.TechniqueId).Where(id => !string.IsNullOrEmpty(id)).ToList();
+        Assert.Equal(ids.Distinct().Count(), ids.Count);
+        Assert.Equal("abt", r.Rubric.Coherence.Advice!.TechniqueId);
+    }
+
+    [Fact]
+    public void Practice_targets_the_weakest_criterion()
+    {
+        var (r, _) = ClaudeEvaluator.ParseResponse(
+            Wrap(Reply(C(1, "prep", "a", "n"), Full, C(0, "ring", "a", "n"), Full, "ring", "Свой текст")), GoodDelivery);
+        Assert.Equal("ring", r.Practice!.TechniqueId);
+        Assert.Equal("conclusion", r.Practice.Criterion);
+        Assert.Equal("Свой текст", r.Practice.Text);
+    }
+
+    [Fact]
+    public void Practice_for_the_wrong_technique_is_replaced_by_the_catalog_drill()
+    {
+        var (r, _) = ClaudeEvaluator.ParseResponse(
+            Wrap(Reply(C(1, "prep", "a", "n"), Full, C(0, "ring", "a", "n"), Full, "prep", "Про мысль")), GoodDelivery);
+        Assert.Equal("ring", r.Practice!.TechniqueId);
+        Assert.Equal(Techniques.Find("ring")!.Drill, r.Practice.Text);
+    }
+
+    [Fact]
+    public void Weak_delivery_gets_a_delivery_technique_and_can_be_the_practice_target()
+    {
+        var fillers = new SpeechMetrics(60, 90, 90, new() { ["ну"] = 6 });
+        var (r, _) = ClaudeEvaluator.ParseResponse(Wrap(Reply(Full, Full, Full, Full, "", "")), fillers);
+        Assert.Equal(0, r.Rubric!.Delivery.Points);
+        Assert.Equal("silent-pause", r.Rubric.Delivery.Advice!.TechniqueId);
+        Assert.Equal("silent-pause", r.Practice!.TechniqueId);
+    }
+
+    [Fact]
+    public void Incomplete_reply_is_rejected()
+    {
+        var broken = """{"thought":{"points":1,"evidence":"e"},"summary":"s"}""";
+        Assert.Throws<InvalidOperationException>(() => ClaudeEvaluator.ParseResponse(Wrap(broken), GoodDelivery));
+    }
+
+    [Fact]
+    public void Stored_evaluations_from_before_the_catalog_still_load()
+    {
+        var old = """
+            {"result":{"score":6,"subScores":null,"summary":"s","strengths":[],"improvements":[],"suggestions":[],
+             "rubric":{"thought":{"points":1,"evidence":"e","toMax":"совет"},"support":{"points":2,"evidence":"e","toMax":""},
+             "conclusion":{"points":1,"evidence":"e","toMax":"кольцо"},"coherence":{"points":2,"evidence":"e","toMax":""},
+             "delivery":{"points":0,"evidence":"e","toMax":"t"}}},
+             "metrics":{"durationSec":60,"wordCount":100,"wordsPerMinute":100,"fillerWords":{}}}
+            """;
+        var s = System.Text.Json.JsonSerializer.Deserialize<StoredEvaluation>(old, WebJson)!;
+        Assert.Null(s.Result.Rubric!.Thought.Advice);
+        Assert.Equal("совет", s.Result.Rubric.Thought.ToMax);
+        Assert.Null(s.Result.Practice);
     }
 }

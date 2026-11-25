@@ -1,5 +1,4 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -58,7 +57,6 @@ export default function Profile() {
       {d?.criteria && <CriteriaCard criteria={d.criteria} />}
 
       <Card style={{ paddingVertical: spacing(0.5) }}>
-        <Row label={t.profile.interests} onPress={() => router.push('/interests')} />
         <Row label={t.profile.support} onPress={() => WebBrowser.openBrowserAsync(SUPPORT_URL)} />
         <Row label={t.profile.privacy} onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)} />
         <Row label={t.profile.signOut} onPress={signOut} />

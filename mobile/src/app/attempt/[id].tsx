@@ -7,7 +7,7 @@ import { AttemptPlayer, ReviewPlayer } from '@/components/audio-player';
 import { ChevronIcon, TrashIcon } from '@/components/icons';
 import { Badge, Button, Card, Centered, Header, Muted, Screen } from '@/components/ui';
 import { fmt, t } from '@/i18n/ru';
-import { api, Criterion, Evaluation, Metrics, RubricKey, SubScores } from '@/lib/api';
+import { api, Criterion, Evaluation, Metrics, RubricKey, SubScores, TechniqueAdvice } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { colors, fonts, radius, spacing, type } from '@/theme';
 
@@ -205,7 +205,9 @@ function CriterionRow({
           )}
         </>
       )}
-      {!ok && !!criterion.toMax && (
+      {!ok && !delivery && criterion.advice ? (
+        <AdviceTip advice={criterion.advice} />
+      ) : !ok && !!criterion.toMax && (
         <View style={styles.tip}>
           <Text style={styles.tipTitle}>{t.result.howToImprove}</Text>
           <Text style={[type.body, { fontSize: 14, lineHeight: 20 }]}>{criterion.toMax}</Text>
@@ -269,6 +271,40 @@ function Points({ value }: { value: number }) {
 }
 
 /** Vocabulary with replacements for repeated words, plus one short exercise for the next attempt. */
+/** How to improve: the technique, its formula, the speaker's own words before and after, and one next step. */
+function AdviceTip({ advice }: { advice: TechniqueAdvice }) {
+  return (
+    <View style={[styles.tip, { gap: spacing(1) }]}>
+      <View style={{ gap: 2 }}>
+        <Text style={styles.tipTitle}>{advice.name ? `${t.result.technique} · ${advice.name}` : t.result.howToImprove}</Text>
+        {!!advice.formula && <Text style={styles.formula}>{advice.formula}</Text>}
+      </View>
+      {!!advice.after && (
+        <View style={{ gap: 4 }}>
+          <Text style={styles.tipLabel}>{t.result.tryThis}</Text>
+          {!!advice.before && (
+            <Text style={[styles.tipText, { color: colors.muted }]}>
+              <Text style={styles.tipLabelInline}>{t.result.was}: </Text>
+              {advice.before}
+            </Text>
+          )}
+          <Text style={styles.tipText}>
+            <Text style={styles.tipLabelInline}>{t.result.became}: </Text>
+            {advice.after}
+            {advice.hypothetical && <Text style={{ color: colors.muted }}> ({t.result.hypothetical})</Text>}
+          </Text>
+        </View>
+      )}
+      {!!advice.nextStep && (
+        <View style={{ gap: 4 }}>
+          <Text style={styles.tipLabel}>{t.result.nextTime}</Text>
+          <Text style={styles.tipText}>{advice.nextStep}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 function PracticeCard({
   evaluation,
   repeats,
@@ -278,7 +314,8 @@ function PracticeCard({
 }) {
   const synonyms = evaluation.synonyms ?? [];
   const counts = new Map(repeats.map((r) => [r.word, r.count]));
-  const exercise = evaluation.suggestions[0];
+  const exercise = evaluation.practice?.text ?? evaluation.suggestions[0];
+  const exerciseTechnique = evaluation.practice?.name;
   // Older evaluations have no synonyms; their vocabulary drill is shown instead.
   const drill = synonyms.length === 0 ? evaluation.drill : null;
   if (synonyms.length === 0 && !drill && !exercise) return null;
@@ -302,12 +339,18 @@ function PracticeCard({
               <Text style={[type.body, { flex: 1, fontSize: 14, lineHeight: 19 }]}>{s.options.join(', ')}</Text>
             </View>
           ))}
-          {!!drill && <Text style={type.body}>{drill}</Text>}
+          {!!drill && (
+            <Text style={type.body}>
+              {!!evaluation.drillTechnique && <Text style={styles.tipLabelInline}>{evaluation.drillTechnique}. </Text>}
+              {drill}
+            </Text>
+          )}
         </View>
       )}
       {!!exercise && (
         <View style={{ gap: 4, marginTop: spacing(1) }}>
           <Text style={type.heading}>{t.result.exercise30}</Text>
+          {!!exerciseTechnique && <Text style={styles.tipTitle}>{`${t.result.technique} · ${exerciseTechnique}`}</Text>}
           <Text style={type.body}>{exercise}</Text>
         </View>
       )}
@@ -454,6 +497,10 @@ const styles = StyleSheet.create({
     marginLeft: 28,
   },
   tipTitle: { ...type.overline, color: colors.accent },
+  formula: { ...type.body, fontSize: 15, lineHeight: 20, fontFamily: fonts.semibold },
+  tipLabel: { ...type.small, color: colors.muted },
+  tipLabelInline: { fontFamily: fonts.semibold },
+  tipText: { ...type.body, fontSize: 14, lineHeight: 20 },
   analysis: { fontSize: 14, lineHeight: 20, color: colors.muted, marginLeft: 28 },
   synonym: { flexDirection: 'row', alignItems: 'center', gap: spacing(1) },
   arrow: { color: colors.faint, fontSize: 14 },

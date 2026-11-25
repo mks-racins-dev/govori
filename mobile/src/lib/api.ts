@@ -57,8 +57,25 @@ export type SubScores = {
 
 /** One rubric criterion: 0–2 points, the evidence, and what would have earned 2 (empty at 2). */
 /** `toMax` is the "how to improve" tip; for delivery it has one line per missed norm. */
-/** `good` is what worked, with a quote; missing on older evaluations. */
-export type Criterion = { points: number; evidence: string; toMax: string; good?: string };
+/**
+ * A catalog technique applied to this speech. `name` and `formula` come from the app's catalog and are empty
+ * when the model picked an unknown technique; `before` is a quote, `after` the same place rewritten.
+ */
+export type TechniqueAdvice = {
+  techniqueId: string;
+  name: string;
+  formula: string;
+  before: string;
+  after: string;
+  hypothetical: boolean;
+  nextStep: string;
+};
+
+/** `good` is what worked, with a quote; `advice` is null at 2 points. Both are missing on older evaluations. */
+export type Criterion = { points: number; evidence: string; toMax: string; good?: string; advice?: TechniqueAdvice | null };
+
+/** The one 30-second exercise, aimed at the weakest criterion's technique. */
+export type Practice = { techniqueId: string; name: string; criterion: string; text: string };
 
 export type RubricKey = 'thought' | 'support' | 'conclusion' | 'coherence' | 'delivery';
 export type Rubric = Record<RubricKey, Criterion>;
@@ -76,6 +93,9 @@ export type Evaluation = {
   drill?: string | null;
   /** Replacements for each word the speaker repeated; missing on older evaluations. */
   synonyms?: { word: string; options: string[] }[] | null;
+  practice?: Practice | null;
+  /** The vocabulary technique the drill trains. */
+  drillTechnique?: string | null;
   summary: string;
   strengths: string[];
   improvements: string[];

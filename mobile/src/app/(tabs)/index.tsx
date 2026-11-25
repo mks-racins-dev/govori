@@ -1,19 +1,23 @@
 import { useQuery } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
+import { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CategoriesSheet } from '@/components/categories-sheet';
 import { DiscArt, MicArt } from '@/components/icons';
 import { Badge, Button, Muted, SectionTitle } from '@/components/ui';
 import { fmt, t } from '@/i18n/ru';
 import { api } from '@/lib/api';
 import { useCategories } from '@/lib/use-categories';
-import { colors, radius, shadow, spacing, type } from '@/theme';
+import { colors, fonts, radius, shadow, spacing, type } from '@/theme';
 
 export default function Home() {
   const me = useQuery({ queryKey: ['me'], queryFn: api.me });
   const categories = useCategories();
+  const allCategories = useCategories(undefined, { includeHidden: true });
+  const [filterOpen, setFilterOpen] = useState(false);
   const genres = useQuery({ queryKey: ['genres'], queryFn: api.genres });
 
   const start = (params?: { category?: string; genre?: string }) => {
@@ -56,6 +60,16 @@ export default function Home() {
           </View>
         </Pressable>
 
+        <SectionTitle
+          right={
+            <Pressable onPress={() => setFilterOpen(true)} hitSlop={8} accessibilityRole="button">
+              <Text style={styles.filterLink}>
+                {fmt(t.home.filter, { on: categories.length, all: allCategories.length })}
+              </Text>
+            </Pressable>
+          }>
+          {t.home.themes}
+        </SectionTitle>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -105,6 +119,7 @@ export default function Home() {
           </>
         )}
       </ScrollView>
+      <CategoriesSheet visible={filterOpen} onClose={() => setFilterOpen(false)} />
     </SafeAreaView>
   );
 }
@@ -146,6 +161,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   genreIcon: { fontSize: 28 },
+  filterLink: { ...type.small, color: colors.accent, fontFamily: fonts.semibold },
   genreName: { ...type.heading, fontSize: 16, lineHeight: 20, color: colors.card },
   genreText: { ...type.small, color: colors.faint },
 });
