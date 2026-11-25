@@ -40,6 +40,17 @@ export const ru = {
     featuredLabel: 'Быстрый старт',
     categories: 'Категории',
     categoryLabel: 'Темы',
+    genres: 'Жанр',
+    /** Icon and one-line description per genre; a genre missing here gets a generic icon and no description. */
+    genreInfo: {
+      'Убедите': { icon: '📣', text: 'Склоните к решению' },
+      'Мнение: за или против': { icon: '⚖️', text: 'Займите позицию' },
+      'Вспомните случай': { icon: '🕰️', text: 'История из жизни' },
+      'Объясните ребёнку': { icon: '🧸', text: 'Сложное — просто' },
+      'Продайте предмет': { icon: '🛍️', text: 'Минутная презентация' },
+      'Защитите странное мнение': { icon: '🦄', text: 'Неожиданная позиция' },
+      'Если бы…': { icon: '✨', text: 'Фантазия на тему' },
+    } as Record<string, { icon: string; text: string } | undefined>,
     hello: 'Готовы говорить?',
     heroTitle: 'Минута на тему',
     heroText: 'Случайная тема, 60 секунд и разбор от ИИ',

@@ -153,7 +153,8 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
         static Criterion Fix(ReplyCriterion c)
         {
             var points = Math.Clamp(c.Points, 0, 2);
-            return new Criterion(points, c.Evidence?.Trim() ?? "", points == 2 ? "" : c.ToMax?.Trim() ?? "");
+            return new Criterion(points, c.Evidence?.Trim() ?? "", points == 2 ? "" : c.ToMax?.Trim() ?? "",
+                c.Good?.Trim() ?? "");
         }
 
         var rubric = new Rubric(Fix(reply.Thought), Fix(reply.Support), Fix(reply.Conclusion), Fix(reply.Coherence),
@@ -191,7 +192,7 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
     }
 
     private sealed record ReplySynonyms(string? Word, List<string>? Options);
-    private sealed record ReplyCriterion(int Points, string? Evidence, string? ToMax);
+    private sealed record ReplyCriterion(int Points, string? Evidence, string? ToMax, string? Good = null);
     private sealed record ReplySkeleton(string? Point, string? Reason, string? Example, string? Conclusion);
     private sealed record Reply(
         ReplyCriterion? Thought, ReplyCriterion? Support, ReplyCriterion? Conclusion, ReplyCriterion? Coherence,
@@ -211,10 +212,11 @@ public class ClaudeEvaluator(HttpClient http, IContentProvider content, string a
             ["properties"] = new JsonObject
             {
                 ["points"] = new JsonObject { ["type"] = "integer" },
+                ["good"] = Str(),
                 ["evidence"] = Str(),
                 ["toMax"] = Str(),
             },
-            ["required"] = new JsonArray("points", "evidence", "toMax"),
+            ["required"] = new JsonArray("points", "good", "evidence", "toMax"),
             ["additionalProperties"] = false,
         };
 

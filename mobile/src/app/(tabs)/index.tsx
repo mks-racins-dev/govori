@@ -14,10 +14,11 @@ import { colors, radius, shadow, spacing, type } from '@/theme';
 export default function Home() {
   const me = useQuery({ queryKey: ['me'], queryFn: api.me });
   const categories = useCategories();
+  const genres = useQuery({ queryKey: ['genres'], queryFn: api.genres });
 
-  const start = (category?: string) => {
+  const start = (params?: { category?: string; genre?: string }) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(category ? { pathname: '/topic', params: { category } } : '/topic');
+    router.push(params ? { pathname: '/topic', params } : '/topic');
   };
 
   const today = new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -61,7 +62,7 @@ export default function Home() {
           contentContainerStyle={styles.carousel}
           style={styles.carouselWrap}>
           {categories.map((c) => (
-            <Pressable key={c.name} onPress={() => start(c.name)} style={({ pressed }) => [styles.tile, pressed && { opacity: 0.85 }]}>
+            <Pressable key={c.name} onPress={() => start({ category: c.name })} style={({ pressed }) => [styles.tile, pressed && { opacity: 0.85 }]}>
               <View style={styles.tileArt}>
                 <DiscArt size={60} />
                 <View style={styles.tileBadge}>
@@ -77,6 +78,32 @@ export default function Home() {
           ))}
         </ScrollView>
 
+        {!!genres.data?.length && (
+          <>
+            <SectionTitle>{t.home.genres}</SectionTitle>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.carousel}
+              style={styles.carouselWrap}>
+              {genres.data.map((g) => {
+                const info = t.home.genreInfo[g.name];
+                return (
+                  <Pressable
+                    key={g.name}
+                    onPress={() => start({ genre: g.name })}
+                    style={({ pressed }) => [styles.genre, pressed && { opacity: 0.85 }]}>
+                    <Text style={styles.genreIcon}>{info?.icon ?? '🎤'}</Text>
+                    <View style={{ gap: 2 }}>
+                      <Text style={styles.genreName}>{g.name}</Text>
+                      {!!info && <Text style={styles.genreText}>{info.text}</Text>}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -110,4 +137,15 @@ const styles = StyleSheet.create({
   tileArt: { alignItems: 'center' },
   tileBadge: { position: 'absolute', bottom: -10 },
   center: { textAlign: 'center', marginTop: 4 },
+  genre: {
+    width: 140,
+    height: 150,
+    backgroundColor: colors.ink,
+    borderRadius: radius.card,
+    padding: spacing(1.75),
+    justifyContent: 'space-between',
+  },
+  genreIcon: { fontSize: 28 },
+  genreName: { ...type.heading, fontSize: 16, lineHeight: 20, color: colors.card },
+  genreText: { ...type.small, color: colors.faint },
 });

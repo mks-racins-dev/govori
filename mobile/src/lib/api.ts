@@ -7,6 +7,18 @@ export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:5080
 export const PRIVACY_URL = `${API_URL}/privacy`;
 export const SUPPORT_URL = `${API_URL}/support`;
 
+/**
+ * An audio source behind auth. Native players send the header themselves; a browser <audio> element can't,
+ * so on web the file is downloaded with the token and played from a local object URL.
+ */
+async function authorizedAudio(path: string): Promise<{ uri: string; headers?: Record<string, string> }> {
+  const headers = { Authorization: `Bearer ${await getToken()}` };
+  if (Platform.OS !== 'web') return { uri: `${API_URL}${path}`, headers };
+  const res = await fetch(`${API_URL}${path}`, { headers });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return { uri: URL.createObjectURL(await res.blob()) };
+}
+
 export type AttemptStatus = 'Recording' | 'Processing' | 'Done' | 'Failed';
 
 /** `hidden`: the user turned this category off; it's left out of lists and random picks. */
@@ -45,7 +57,8 @@ export type SubScores = {
 
 /** One rubric criterion: 0–2 points, the evidence, and what would have earned 2 (empty at 2). */
 /** `toMax` is the "how to improve" tip; for delivery it has one line per missed norm. */
-export type Criterion = { points: number; evidence: string; toMax: string };
+/** `good` is what worked, with a quote; missing on older evaluations. */
+export type Criterion = { points: number; evidence: string; toMax: string; good?: string };
 
 export type RubricKey = 'thought' | 'support' | 'conclusion' | 'coherence' | 'delivery';
 export type Rubric = Record<RubricKey, Criterion>;
@@ -163,14 +176,20 @@ export const api = {
   attempt: (id: string) => request<AttemptDetail>(`/attempts/${id}`),
   retryAttempt: (id: string) => request<void>(`/attempts/${id}/retry`, { method: 'POST' }),
   deleteAttempt: (id: string) => request<void>(`/attempts/${id}`, { method: 'DELETE' }),
-  audioSource: async (id: string) => ({
-    uri: `${API_URL}/attempts/${id}/audio`,
-    headers: { Authorization: `Bearer ${await getToken()}` },
-  }),
-  reviewAudioSource: async (id: string) => ({
-    uri: `${API_URL}/attempts/${id}/review-audio`,
-    headers: { Authorization: `Bearer ${await getToken()}` },
-  }),
+  audioSource: (id: string) => authorizedAudio(`/attempts/${id}/audio`),
+  /**
+   * The server voices the review on its first request, which takes several seconds — longer than the native
+   * player waits. So the request is made here first; the player then gets the already voiced file.
+   */
+  reviewAudioSource: async (id: string) => {
+    const path = `/attempts/${id}/review-audio`;
+    if (Platform.OS === 'web') return authorizedAudio(path); // downloads the whole file, voicing included
+    const res = await fetch(`${API_URL}${path}`, {
+      headers: { Authorization: `Bearer ${await getToken()}`, Range: 'bytes=0-1' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return authorizedAudio(path);
+  },
 
   me: () => request<Me>('/me'),
   setHiddenCategories: (categories: string[]) =>

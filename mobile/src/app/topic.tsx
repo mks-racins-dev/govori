@@ -8,7 +8,7 @@ import { MicArt, ShuffleIcon } from '@/components/icons';
 import { Badge, Button, Centered, Header, Muted, Screen } from '@/components/ui';
 import { fmt, t } from '@/i18n/ru';
 import { api } from '@/lib/api';
-import { colors, fonts, radius, shadow, spacing, type } from '@/theme';
+import { colors, radius, shadow, spacing, type } from '@/theme';
 
 const MAX_REROLLS = 2;
 
@@ -93,13 +93,6 @@ export default function TopicScreen() {
                 <Difficulty level={topic.data.difficulty} />
               </View>
               <Text style={[type.title, styles.topic]}>{topic.data.text}</Text>
-              {!!topic.data.technique && (
-                <View style={styles.tip}>
-                  <Text style={type.overline}>{t.topic.technique}</Text>
-                  <Text style={[type.body, styles.technique]}>{topic.data.technique}</Text>
-                  {!!topic.data.hint && <Text style={[type.small, { color: colors.ink }]}>{topic.data.hint}</Text>}
-                </View>
-              )}
               <View style={styles.track}>
                 <View style={[styles.trackFill, { width: `${prepProgress * 100}%` }]} />
               </View>
@@ -137,8 +130,6 @@ const styles = StyleSheet.create({
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing(0.75), flexShrink: 1 },
   dots: { flexDirection: 'row', gap: 4 },
   dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.line },
-  tip: { backgroundColor: colors.fill, borderRadius: radius.input, padding: spacing(1.75), gap: 4 },
-  technique: { fontFamily: fonts.semibold },
   card: { backgroundColor: colors.card, borderRadius: radius.card, overflow: 'hidden', ...shadow },
   art: { height: 112, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center' },
   body: { padding: spacing(3), gap: spacing(2), alignItems: 'stretch' },
